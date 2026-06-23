@@ -270,5 +270,6 @@ class AIPlayer:
         # Check win condition
         GameService.check_win_condition(game)
 
-        # End turn
-        GameService.end_turn(game)
+        # End turn only if move wasn't already end_turn
+        if move.move_type != "end_turn":
+            GameService.end_turn(game)

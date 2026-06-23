@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useGameStore } from '@/store/gameStore';
 import { useGameState } from '@/hooks/useGameState';
@@ -7,11 +8,14 @@ import GameBoard from '@/components/GameBoard';
 import ResourcePanel from '@/components/ResourcePanel';
 import ActionPanel from '@/components/ActionPanel';
 
+type BuildMode = 'none' | 'settlement' | 'road';
+
 export default function GamePage() {
   const params = useParams();
   const gameId = (params?.id as string) || '';
   const gameState = useGameStore();
   const { fetchGameState } = useGameState(gameId);
+  const [buildMode, setBuildMode] = useState<BuildMode>('none');
 
   if (gameState.loading && !gameState.gameId) {
     return (
@@ -48,7 +52,7 @@ export default function GamePage() {
       <div className="flex flex-1 overflow-hidden gap-4 p-4">
         {/* Left: Game Board */}
         <div className="flex-1 bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
-          <GameBoard gameId={gameId} />
+          <GameBoard gameId={gameId} buildMode={buildMode} onBuildModeChange={setBuildMode} />
         </div>
 
         {/* Right Sidebar */}
@@ -57,7 +61,7 @@ export default function GamePage() {
           <ResourcePanel />
 
           {/* Action Panel */}
-          <ActionPanel gameId={gameId} isHumanTurn={isHumanTurn} onActionComplete={fetchGameState} />
+          <ActionPanel gameId={gameId} isHumanTurn={isHumanTurn} onActionComplete={fetchGameState} onBuildModeChange={setBuildMode} />
 
           {/* Players Info */}
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 flex-1 overflow-y-auto">
