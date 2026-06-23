@@ -187,3 +187,33 @@ class TestGameAPI:
         state2 = client.get(f"/game/{game_id}").json()
         assert state2["current_player_id"] == 1
         assert state2["turn_number"] > state1["turn_number"]
+
+    def test_ai_turn_success(self):
+        """Test executing an AI turn."""
+        # Create game
+        create_response = client.post(
+            "/game/new", json={"player_name": "Alice"}
+        )
+        game_id = create_response.json()["game_id"]
+
+        # End human turn to switch to AI
+        client.post(f"/game/{game_id}/end-turn")
+
+        # Execute AI turn
+        response = client.post(f"/game/{game_id}/ai-turn")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["next_player_id"] == 0
+
+    def test_ai_turn_wrong_player(self):
+        """Test AI turn endpoint when it's not AI's turn fails."""
+        # Create game
+        create_response = client.post(
+            "/game/new", json={"player_name": "Alice"}
+        )
+        game_id = create_response.json()["game_id"]
+
+        # Try to execute AI turn when human's turn
+        response = client.post(f"/game/{game_id}/ai-turn")
+        assert response.status_code == 400

@@ -191,3 +191,26 @@ def get_game_status(game_id: str):
         "current_player": game.get_current_player().name,
         "turn_number": game.turn_number,
     }
+
+
+@router.post("/{game_id}/ai-turn")
+def execute_ai_turn(game_id: str):
+    """Execute the AI opponent's turn."""
+    game = _get_game_or_404(game_id)
+
+    # Only execute AI turn if it's actually the AI's turn
+    current_player = game.get_current_player()
+    if current_player.player_type.value != "ai":
+        raise HTTPException(
+            status_code=400,
+            detail="Not the AI's turn"
+        )
+
+    GameService.execute_ai_turn(game, current_player.id)
+
+    return {
+        "success": True,
+        "message": "AI turn executed",
+        "next_player_id": game.get_current_player().id,
+        "next_player_name": game.get_current_player().name,
+    }

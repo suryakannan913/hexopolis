@@ -230,3 +230,11 @@ class GameService:
                 ]
                 player.points -= 1
         return valid
+
+    @staticmethod
+    def execute_ai_turn(game: Game, player_id: int) -> None:
+        """Execute a full AI turn."""
+        from app.ai.evaluator import AIPlayer
+
+        ai = AIPlayer(player_id)
+        ai.take_turn(game)
