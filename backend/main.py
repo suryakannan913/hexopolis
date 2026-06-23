@@ -1,7 +1,11 @@
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from app.routes import game
 
 app = FastAPI(title="Hexopolis API", version="0.1.0")
+
+# Include game routes
+app.include_router(game.router)
 
 
 @app.get("/")
@@ -10,10 +14,10 @@ def root():
     return {"message": "Hexopolis API is running"}
 
 
-@app.get("/docs")
-def docs():
-    """Redirect to Swagger UI."""
-    return {"message": "Visit /docs for Swagger UI"}
+@app.get("/health")
+def health():
+    """Health check for deployment."""
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
