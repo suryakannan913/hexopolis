@@ -1,0 +1,177 @@
+/* Animations for game elements */
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes glow {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(59, 130, 246, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.8);
+  }
+}
+
+/* Settlement placement animation */
+.settlement-place {
+  animation: fadeInScale 0.4s ease-out;
+}
+
+/* Road building animation */
+.road-build {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Dice roll animation */
+.dice-roll {
+  animation: spin 0.6s ease-in-out, bounce 0.6s ease-in-out;
+}
+
+/* Button animations */
+.button-hover {
+  transition: all 0.2s ease;
+}
+
+.button-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.button-hover:active {
+  transform: translateY(0);
+}
+
+/* Panel animations */
+.panel-slide {
+  animation: slideInUp 0.3s ease-out;
+}
+
+/* Notification animations */
+.notification-enter {
+  animation: slideInDown 0.3s ease-out;
+}
+
+.notification-exit {
+  animation: slideInDown 0.3s ease-in reverse;
+}
+
+/* Glow effect for interactive elements */
+.interactive-glow {
+  transition: box-shadow 0.2s ease;
+}
+
+.interactive-glow:hover {
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+}
+
+.interactive-glow.active {
+  animation: glow 1.5s ease-in-out infinite;
+}
+
+/* Smooth transitions */
+.smooth-transition {
+  transition: all 0.3s ease;
+}
+
+/* Loading spinner */
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: white;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Success animation */
+.success-check {
+  animation: fadeInScale 0.4s ease-out;
+}
+
+/* Resource counter animation */
+.resource-change {
+  animation: bounce 0.4s ease-out;
+}
+
+/* Turn indicator pulse */
+.turn-indicator {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .button-hover:hover {
+    transform: translateY(-1px);
+  }
+
+  .panel-slide {
+    animation: slideInUp 0.2s ease-out;
+  }
+}

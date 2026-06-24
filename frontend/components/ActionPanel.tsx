@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useGameStore } from '@/store/gameStore';
 import { rollDice, endTurn, executeAITurn } from '@/lib/api';
+import { useToast } from './Toast';
 import BuildPanel from './BuildPanel';
 
 type BuildMode = 'none' | 'settlement' | 'road';
@@ -21,6 +22,7 @@ export default function ActionPanel({
   onBuildModeChange,
 }: ActionPanelProps) {
   const gameState = useGameStore();
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [buildMode, setBuildMode] = useState<BuildMode>('none');
@@ -43,9 +45,12 @@ export default function ActionPanel({
     try {
       const result = await rollDice(gameId);
       gameState.setGameState({ lastDiceRoll: result.dice_roll });
+      toast.success(`🎲 Rolled a ${result.dice_roll}!`);
       onActionComplete();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to roll dice');
+      const message = err instanceof Error ? err.message : 'Failed to roll dice';
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -57,9 +62,12 @@ export default function ActionPanel({
     try {
       setBuildMode('none');
       await endTurn(gameId);
+      toast.success('✓ Turn ended');
       onActionComplete();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to end turn');
+      const message = err instanceof Error ? err.message : 'Failed to end turn';
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -70,9 +78,12 @@ export default function ActionPanel({
     setError(null);
     try {
       await executeAITurn(gameId);
+      toast.success('✓ AI turn complete');
       onActionComplete();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to execute AI turn');
+      const message = err instanceof Error ? err.message : 'Failed to execute AI turn';
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -84,65 +95,90 @@ export default function ActionPanel({
   };
 
   return (
-    <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 space-y-4">
-      <div>
-        <h3 className="font-semibold mb-3">Actions</h3>
+    <>
+      <div className="panel-slide bg-gradient-to-br from-slate-800 to-slate-900 rounded-lg border border-slate-700/50 p-4 space-y-4 shadow-lg">
+        <div>
+          <h3 className="font-semibold mb-3 text-slate-100">Actions</h3>
 
-        {error && <div className="mb-3 p-2 bg-red-900/50 border border-red-700 rounded text-red-200 text-sm">{error}</div>}
+          {gameState.status === 'won' ? (
+            <div className="p-3 bg-gradient-to-r from-green-900/60 to-emerald-900/60 border border-green-700/50 rounded text-green-100 text-sm font-semibold settlement-place">
+              🎉 Game Over! {gameState.players.find((p) => p.points >= 10)?.name} won!
+            </div>
+          ) : isHumanTurn ? (
+            <div className="space-y-2">
+              <button
+                onClick={handleRollDice}
+                disabled={loading || gameState.lastDiceRoll !== null}
+                className="button-hover w-full py-3 px-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:from-slate-600 disabled:to-slate-700 rounded font-semibold text-sm text-white shadow-md disabled:shadow-none"
+              >
+                {loading ? (
+                  <>
+                    <span className="spinner"></span> Rolling...
+                  </>
+                ) : gameState.lastDiceRoll ? (
+                  `🎲 Rolled ${gameState.lastDiceRoll}`
+                ) : (
+                  '🎲 Roll Dice'
+                )}
+              </button>
 
-        {gameState.status === 'won' ? (
-          <div className="p-3 bg-green-900/50 border border-green-700 rounded text-green-200 text-sm font-semibold">
-            🎉 Game Over! {gameState.players.find((p) => p.points >= 10)?.name} won!
+              <button
+                onClick={handleEndTurn}
+                disabled={loading}
+                className="button-hover w-full py-3 px-3 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 disabled:from-slate-600 disabled:to-slate-700 rounded font-semibold text-sm text-white shadow-md disabled:shadow-none"
+              >
+                {loading ? (
+                  <>
+                    <span className="spinner"></span> Processing...
+                  </>
+                ) : (
+                  '→ End Turn'
+                )}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="turn-indicator p-3 bg-slate-700/40 border border-slate-600/50 rounded text-slate-300 text-sm font-medium">
+                🤖 AI Opponent's Turn
+              </div>
+              <button
+                onClick={handleAITurn}
+                disabled={loading}
+                className="button-hover w-full py-3 px-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:from-slate-600 disabled:to-slate-700 rounded font-semibold text-sm text-white shadow-md disabled:shadow-none"
+              >
+                {loading ? (
+                  <>
+                    <span className="spinner"></span> Thinking...
+                  </>
+                ) : (
+                  '▶ Execute AI Turn'
+                )}
+              </button>
+            </div>
+          )}
+      </div>
+
+          <div className="pt-3 border-t border-slate-600/50">
+            <div className="text-xs text-slate-400 space-y-1">
+              <p>📝 Dice: {gameState.lastDiceRoll ? `${gameState.lastDiceRoll}` : '—'}</p>
+              <p>🔄 Turn: {gameState.turnNumber}</p>
+            </div>
           </div>
-        ) : isHumanTurn ? (
-          <div className="space-y-2">
-            <button
-              onClick={handleRollDice}
-              disabled={loading || gameState.lastDiceRoll !== null}
-              className="w-full py-2 px-3 bg-green-600 hover:bg-green-700 disabled:bg-slate-600 rounded font-semibold transition text-sm"
-            >
-              {loading ? '...' : gameState.lastDiceRoll ? `🎲 Rolled ${gameState.lastDiceRoll}` : '🎲 Roll Dice'}
-            </button>
+        </div>
 
-            <button
-              onClick={handleEndTurn}
-              disabled={loading}
-              className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 rounded font-semibold transition text-sm"
-            >
-              {loading ? '...' : 'End Turn'}
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-slate-400">AI Opponent's Turn</p>
-            <button
-              onClick={handleAITurn}
-              disabled={loading}
-              className="w-full py-2 px-3 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-600 rounded font-semibold transition text-sm"
-            >
-              {loading ? '🤖 Thinking...' : '▶ Execute AI Turn'}
-            </button>
+        {isHumanTurn && (
+          <div className="border-t border-slate-600/50 pt-4">
+            <BuildPanel
+              isHumanTurn={isHumanTurn}
+              onBuildModeChange={handleBuildModeChange}
+              canAffordSettlement={canAffordSettlement}
+              canAffordRoad={canAffordRoad}
+            />
           </div>
         )}
       </div>
 
-      {isHumanTurn && (
-        <div className="border-t border-slate-600 pt-4">
-          <BuildPanel
-            isHumanTurn={isHumanTurn}
-            onBuildModeChange={handleBuildModeChange}
-            canAffordSettlement={canAffordSettlement}
-            canAffordRoad={canAffordRoad}
-          />
-        </div>
-      )}
-
-      <div className="pt-3 border-t border-slate-600">
-        <div className="text-xs text-slate-400">
-          <p>📝 Dice Roll: {gameState.lastDiceRoll ? `${gameState.lastDiceRoll}` : 'Not rolled'}</p>
-          <p>🔄 Turn: {gameState.turnNumber}</p>
-        </div>
-      </div>
-    </div>
+    <Toast toasts={toast.toasts} onDismiss={toast.dismiss} />
+    </>
   );
 }
