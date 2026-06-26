@@ -13,18 +13,17 @@ export interface PixelCoord {
   y: number;
 }
 
-// Hex size - adjustable for zoom
-const HEX_RADIUS = 50;
-const HEX_WIDTH = HEX_RADIUS * 2;
-const HEX_HEIGHT = (HEX_RADIUS * Math.sqrt(3)) / 2;
+// Hex size - adjustable for zoom. Pointy-top hexagons (point up/down),
+// which tile into the classic horizontal Catan rows.
+export const HEX_RADIUS = 52;
+const SQRT3 = Math.sqrt(3);
 
-// Spacing between hex centers (for pointy-top hexagons)
-const HEX_SPACING_X = HEX_WIDTH * 0.75;
-const HEX_SPACING_Y = HEX_HEIGHT + HEX_RADIUS / 2;
+// Center-to-center spacing for pointy-top hexes (perfect tiling, no gaps).
+const HEX_SPACING_X = SQRT3 * HEX_RADIUS;
+const HEX_SPACING_Y = 1.5 * HEX_RADIUS;
 
 /**
- * Convert axial hex coordinates to pixel coordinates.
- * Assumes pointy-top hexagons centered around origin.
+ * Convert axial hex coordinates to pixel coordinates (pointy-top).
  */
 export function hexToPixel(hex: HexCoord, originX: number, originY: number): PixelCoord {
   const x = originX + HEX_SPACING_X * (hex.q + hex.r / 2);
@@ -33,16 +32,13 @@ export function hexToPixel(hex: HexCoord, originX: number, originY: number): Pix
 }
 
 /**
- * Convert pixel coordinates to axial hex coordinates (inverse operation).
+ * Convert pixel coordinates to axial hex coordinates (inverse, pointy-top).
  */
 export function pixelToHex(pixel: PixelCoord, originX: number, originY: number): HexCoord {
-  const x = (pixel.x - originX) / HEX_SPACING_X;
-  const y = (pixel.y - originY) / HEX_SPACING_Y;
-
-  const q = x - y / 2;
-  const r = y;
-
-  // Round to nearest hex (cube rounding)
+  const px = pixel.x - originX;
+  const py = pixel.y - originY;
+  const r = py / HEX_SPACING_Y;
+  const q = px / HEX_SPACING_X - r / 2;
   return roundHex({ q, r });
 }
 
@@ -68,17 +64,36 @@ function roundHex(hex: HexCoord): HexCoord {
 }
 
 /**
- * Get the 6 vertices (corners) of a hex in pixel coordinates.
+ * Get the 6 corners of a pointy-top hex in pixel coordinates.
  */
-export function getHexVertices(center: PixelCoord): PixelCoord[] {
+export function getHexVertices(center: PixelCoord, radius: number = HEX_RADIUS): PixelCoord[] {
   const vertices: PixelCoord[] = [];
   for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 3) * i; // 60 degrees per vertex
-    const x = center.x + HEX_RADIUS * Math.cos(angle);
-    const y = center.y + HEX_RADIUS * Math.sin(angle);
-    vertices.push({ x, y });
+    const angle = (Math.PI / 180) * (60 * i - 30); // pointy-top
+    vertices.push({
+      x: center.x + radius * Math.cos(angle),
+      y: center.y + radius * Math.sin(angle),
+    });
   }
   return vertices;
+}
+
+/**
+ * Fill a hexagon of arbitrary radius (used for the sand island / shore).
+ */
+export function fillHexShape(
+  ctx: CanvasRenderingContext2D,
+  center: PixelCoord,
+  radius: number,
+  fill: string
+) {
+  const v = getHexVertices(center, radius);
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.moveTo(v[0].x, v[0].y);
+  for (let i = 1; i < v.length; i++) ctx.lineTo(v[i].x, v[i].y);
+  ctx.closePath();
+  ctx.fill();
 }
 
 /**

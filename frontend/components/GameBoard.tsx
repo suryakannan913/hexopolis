@@ -4,17 +4,18 @@ import { useRef, useEffect, useState } from 'react';
 import { useGameStore } from '@/store/gameStore';
 import { buildSettlement, buildRoad } from '@/lib/api';
 import {
+  HEX_RADIUS,
   hexToPixel,
   getSettlementVertices,
   getHexEdges,
   drawHex,
   drawHexBorder,
+  fillHexShape,
   getResourceColor,
   getResourceIcon,
   isPointInHex,
   getVertexPixelCoord,
   drawSettlement,
-  drawVertexMarker,
   drawRoad,
   drawNumberChip,
   isPointNearEdge,
@@ -204,19 +205,30 @@ export default function GameBoard({ gameId, buildMode = 'none', onBuildModeChang
     const originX = canvas.width / 2;
     const originY = canvas.height / 2;
 
-    // Clear canvas with a soft vertical gradient ("table")
-    const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    bg.addColorStop(0, '#0b1220');
-    bg.addColorStop(1, '#0f172a');
-    ctx.fillStyle = bg;
+    // Ocean: deep-blue radial gradient
+    const ocean = ctx.createRadialGradient(
+      originX, originY, 60,
+      originX, originY, Math.max(canvas.width, canvas.height) * 0.7
+    );
+    ocean.addColorStop(0, '#1e5b8f');
+    ocean.addColorStop(1, '#0c2742');
+    ctx.fillStyle = ocean;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+    const centers = boardHexes.map((h) => hexToPixel(h.coord, originX, originY));
+
+    // Shore glow: a lighter ring of water around the island
+    centers.forEach((c) => fillHexShape(ctx, c, HEX_RADIUS * 1.62, 'rgba(120, 190, 230, 0.18)'));
+    // Sandy coastline: overlapping enlarged sand hexes form one contiguous island
+    centers.forEach((c) => fillHexShape(ctx, c, HEX_RADIUS * 1.3, '#e8d5a3'));
+    centers.forEach((c) => fillHexShape(ctx, c, HEX_RADIUS * 1.22, '#d9c08a'));
+
     // Draw hexes with resource color, icon, and number token
-    boardHexes.forEach((hexData) => {
-      const c = hexToPixel(hexData.coord, originX, originY);
+    boardHexes.forEach((hexData, i) => {
+      const c = centers[i];
       const color = getResourceColor(hexData.resource);
 
-      drawHex(ctx, c, color, '#0b1220', 2.5);
+      drawHex(ctx, c, color, 'rgba(15,23,42,0.45)', 2);
 
       const isHoverHex =
         buildMode === 'none' &&
@@ -237,7 +249,7 @@ export default function GameBoard({ gameId, buildMode = 'none', onBuildModeChang
       }
     });
 
-    // Faint markers on empty buildable vertices while placing
+    // Glowing markers on empty buildable corners while placing a settlement
     if (buildMode === 'settlement') {
       const occupied = new Set(
         gameState.settlements.map((s) =>
@@ -248,7 +260,37 @@ export default function GameBoard({ gameId, buildMode = 'none', onBuildModeChang
         const key = vertex.hexCoords.map((h) => `${h.q},${h.r}`).sort().join('|');
         if (occupied.has(key)) return;
         const pv = getVertexPixelCoord(vertex, originX, originY);
-        drawVertexMarker(ctx, pv);
+        // soft outer glow
+        ctx.fillStyle = 'rgba(134, 239, 172, 0.22)';
+        ctx.beginPath();
+        ctx.arc(pv.x, pv.y, 13, 0, Math.PI * 2);
+        ctx.fill();
+        // bright ring
+        ctx.strokeStyle = 'rgba(187, 247, 208, 0.9)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(pv.x, pv.y, 8, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+    }
+
+    // Glowing markers on empty buildable edges while placing a road
+    if (buildMode === 'road') {
+      const occupied = new Set(
+        gameState.roads.map((r) =>
+          [`${r.hex1[0]},${r.hex1[1]}`, `${r.hex2[0]},${r.hex2[1]}`].sort().join('|')
+        )
+      );
+      allEdges.forEach((edge) => {
+        const key = [`${edge.hex1.q},${edge.hex1.r}`, `${edge.hex2.q},${edge.hex2.r}`].sort().join('|');
+        if (occupied.has(key)) return;
+        const p1 = hexToPixel(edge.hex1, originX, originY);
+        const p2 = hexToPixel(edge.hex2, originX, originY);
+        const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+        ctx.fillStyle = 'rgba(134, 239, 172, 0.5)';
+        ctx.beginPath();
+        ctx.arc(mid.x, mid.y, 5, 0, Math.PI * 2);
+        ctx.fill();
       });
     }
 
