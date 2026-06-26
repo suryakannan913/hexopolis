@@ -10,11 +10,13 @@ import {
   drawHex,
   drawHexBorder,
   getResourceColor,
-  drawTextInHex,
+  getResourceIcon,
   isPointInHex,
   getVertexPixelCoord,
   drawSettlement,
+  drawVertexMarker,
   drawRoad,
+  drawNumberChip,
   isPointNearEdge,
   type HexCoord,
   type PixelCoord,
@@ -202,46 +204,62 @@ export default function GameBoard({ gameId, buildMode = 'none', onBuildModeChang
     const originX = canvas.width / 2;
     const originY = canvas.height / 2;
 
-    // Clear canvas
-    ctx.fillStyle = '#0f172a';
+    // Clear canvas with a soft vertical gradient ("table")
+    const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    bg.addColorStop(0, '#0b1220');
+    bg.addColorStop(1, '#0f172a');
+    ctx.fillStyle = bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw hexes
+    // Draw hexes with resource color, icon, and number token
     boardHexes.forEach((hexData) => {
-      const pixelCoord = hexToPixel(hexData.coord, originX, originY);
+      const c = hexToPixel(hexData.coord, originX, originY);
       const color = getResourceColor(hexData.resource);
 
-      drawHex(ctx, pixelCoord, color, '#1e293b', 2);
+      drawHex(ctx, c, color, '#0b1220', 2.5);
 
-      if (hoveredHex && hoveredHex.q === hexData.coord.q && hoveredHex.r === hexData.coord.r) {
-        drawHexBorder(ctx, pixelCoord, '#60a5fa', 3);
-      }
+      const isHoverHex =
+        buildMode === 'none' &&
+        hoveredHex &&
+        hoveredHex.q === hexData.coord.q &&
+        hoveredHex.r === hexData.coord.r;
+      if (isHoverHex) drawHexBorder(ctx, c, '#fbbf24', 3);
 
+      // Resource icon (upper area)
+      ctx.font = '19px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(getResourceIcon(hexData.resource), c.x, c.y - 16);
+
+      // Number token (lower-center) for producing hexes
       if (hexData.diceNumber && hexData.diceNumber !== 7) {
-        const textColor = ['wheat', 'wood'].includes(hexData.resource || '') ? '#000' : '#fff';
-        drawTextInHex(ctx, hexData.diceNumber.toString(), pixelCoord, textColor, 18);
+        drawNumberChip(ctx, { x: c.x, y: c.y + 13 }, hexData.diceNumber, 15);
       }
     });
 
-    // Draw placeable spots (faint) when in build mode
+    // Faint markers on empty buildable vertices while placing
     if (buildMode === 'settlement') {
+      const occupied = new Set(
+        gameState.settlements.map((s) =>
+          s.vertexCoords.map((v) => `${v[0]},${v[1]}`).sort().join('|')
+        )
+      );
       allVertices.forEach((vertex) => {
+        const key = vertex.hexCoords.map((h) => `${h.q},${h.r}`).sort().join('|');
+        if (occupied.has(key)) return;
         const pv = getVertexPixelCoord(vertex, originX, originY);
-        ctx.fillStyle = 'rgba(148, 163, 184, 0.35)';
-        ctx.beginPath();
-        ctx.arc(pv.x, pv.y, 5, 0, Math.PI * 2);
-        ctx.fill();
+        drawVertexMarker(ctx, pv);
       });
     }
 
-    // Draw placed roads (from backend) — under settlements
+    // Placed roads (under settlements)
     gameState.roads.forEach((road) => {
       const p1 = hexToPixel({ q: road.hex1[0], r: road.hex1[1] }, originX, originY);
       const p2 = hexToPixel({ q: road.hex2[0], r: road.hex2[1] }, originX, originY);
-      drawRoad(ctx, p1, p2, road.color, 6);
+      drawRoad(ctx, p1, p2, road.color, 7);
     });
 
-    // Draw placed settlements (from backend)
+    // Placed settlements
     gameState.settlements.forEach((s) => {
       const vertex: Vertex = {
         hexCoords: [
@@ -251,13 +269,17 @@ export default function GameBoard({ gameId, buildMode = 'none', onBuildModeChang
         ],
       };
       const pv = getVertexPixelCoord(vertex, originX, originY);
-      drawSettlement(ctx, pv, s.color, 10);
+      drawSettlement(ctx, pv, s.color, 11);
     });
 
-    // Draw hover highlight for the spot being placed
+    // Hover preview of the spot being placed
     if (buildMode === 'settlement' && hoveredVertex) {
       const pv = getVertexPixelCoord(hoveredVertex, originX, originY);
-      drawSettlement(ctx, pv, '#60a5fa', 13);
+      ctx.fillStyle = 'rgba(96, 165, 250, 0.25)';
+      ctx.beginPath();
+      ctx.arc(pv.x, pv.y, 16, 0, Math.PI * 2);
+      ctx.fill();
+      drawSettlement(ctx, pv, '#60a5fa', 12);
     }
     if (buildMode === 'road' && hoveredEdge) {
       const p1 = hexToPixel(hoveredEdge.hex1, originX, originY);
@@ -265,32 +287,22 @@ export default function GameBoard({ gameId, buildMode = 'none', onBuildModeChang
       drawRoad(ctx, p1, p2, '#60a5fa', 8);
     }
 
-    // Draw title
-    ctx.fillStyle = '#e2e8f0';
-    ctx.font = 'bold 14px Arial';
-    ctx.textAlign = 'left';
-    ctx.fillText(`Turn: ${gameState.turnNumber} • ${gameState.currentPlayerName}`, 10, 20);
-
-    if (buildMode !== 'none') {
-      ctx.fillStyle = '#60a5fa';
-      ctx.fillText(`Building: ${buildMode === 'settlement' ? '🏘️ Settlement' : '🛣️ Road'}`, 10, 40);
-    }
-
-    if (loading) {
-      ctx.fillStyle = '#fbbf24';
-      ctx.fillText('Building...', 10, 60);
-    }
-
+    // Lightweight build-mode hint / error (top-left)
     if (error) {
-      ctx.fillStyle = '#ef4444';
-      ctx.fillText(`Error: ${error}`, 10, 60);
+      ctx.fillStyle = '#fca5a5';
+      ctx.font = 'bold 13px system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(`⚠ ${error}`, 12, 22);
+    } else if (buildMode !== 'none') {
+      ctx.fillStyle = '#93c5fd';
+      ctx.font = 'bold 13px system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(
+        buildMode === 'settlement' ? '🏘️ Click a corner to place' : '🛣️ Click an edge to place',
+        12,
+        22
+      );
     }
-
-    // Draw legend
-    ctx.font = '12px Arial';
-    ctx.fillStyle = '#94a3b8';
-    ctx.textAlign = 'left';
-    ctx.fillText('🌲 Wood  🌾 Wheat  ⛏️ Ore  🧱 Brick  🐑 Sheep', 10, canvas.height - 15);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState.board, gameState.settlements, gameState.roads, hoveredHex, hoveredVertex, hoveredEdge, gameState.turnNumber, gameState.currentPlayerName, buildMode, loading, error]);
 
