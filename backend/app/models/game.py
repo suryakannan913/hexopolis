@@ -138,6 +138,8 @@ class Game:
         """Advance to next player's turn."""
         self.current_player_id = (self.current_player_id + 1) % len(self.players)
         self.turn_number += 1
+        # Fresh turn: the new current player has not rolled yet
+        self.last_dice_roll = None
 
     def can_place_settlement(self, player_id: int, vertex: Vertex) -> bool:
         """Check if a player can legally place a settlement at a vertex.

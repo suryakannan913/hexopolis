@@ -25,6 +25,24 @@ export interface GameState {
   }>;
   settlementsCount: number;
   roadsCount: number;
+  board: Array<{
+    q: number;
+    r: number;
+    resource: string | null;
+    diceNumber: number | null;
+  }>;
+  settlements: Array<{
+    ownerId: number;
+    color: string;
+    vertexCoords: [number, number][];
+  }>;
+  roads: Array<{
+    ownerId: number;
+    color: string;
+    hex1: [number, number];
+    hex2: [number, number];
+  }>;
+  setupComplete: boolean;
   loading: boolean;
   error: string | null;
 }
@@ -47,6 +65,10 @@ const initialState: Omit<GameState, keyof GameActions> = {
   players: [],
   settlementsCount: 0,
   roadsCount: 0,
+  board: [],
+  settlements: [],
+  roads: [],
+  setupComplete: false,
   loading: false,
   error: null,
 };

@@ -51,6 +51,29 @@ class PlayerSchema(BaseModel):
     roads_count: int
 
 
+class BoardHexSchema(BaseModel):
+    """A board hex with its position, resource, and dice number."""
+    q: int
+    r: int
+    resource: Optional[str]
+    dice_number: Optional[int]
+
+
+class BoardSettlementSchema(BaseModel):
+    """A placed settlement, with the 3 hex coords defining its vertex."""
+    owner_id: int
+    color: str
+    vertex_coords: List[tuple[int, int]]
+
+
+class BoardRoadSchema(BaseModel):
+    """A placed road, defined by the two hex coords it borders."""
+    owner_id: int
+    color: str
+    hex1: tuple[int, int]
+    hex2: tuple[int, int]
+
+
 class GameStateSchema(BaseModel):
     """Complete game state."""
     id: str
@@ -62,6 +85,10 @@ class GameStateSchema(BaseModel):
     players: List[PlayerSchema]
     settlements_count: int
     roads_count: int
+    board: List[BoardHexSchema]
+    settlements: List[BoardSettlementSchema]
+    roads: List[BoardRoadSchema]
+    setup_complete: bool
 
 
 class GameCreateRequest(BaseModel):

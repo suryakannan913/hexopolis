@@ -188,6 +188,24 @@ class Board:
             edges.append(edge)
         return edges
 
+    def get_edges_for_vertex(self, vertex: Vertex) -> List[Edge]:
+        """Get the 3 edges incident to a vertex.
+
+        A vertex is the corner shared by 3 hexes (a, b, c). The edges meeting
+        at that corner are the borders between each pair of those hexes.
+        """
+        a, b, c = vertex.hex_coords
+        return [Edge(a, b), Edge(b, c), Edge(a, c)]
+
+    def get_edge_endpoints(self, edge: Edge) -> List[Vertex]:
+        """Get the 2 vertices at the ends of an edge.
+
+        An edge borders hexes h1 and h2. The two adjacent hexes that h1 and h2
+        share (their common neighbors) define the two endpoint corners.
+        """
+        common = [n for n in edge.hex1.neighbors() if n in set(edge.hex2.neighbors())]
+        return [Vertex((edge.hex1, edge.hex2, c)) for c in common]
+
     def get_hexes_for_vertex(self, vertex: Vertex) -> List[Hex]:
         """Get up to 3 hexes that share a vertex."""
         hexes = []

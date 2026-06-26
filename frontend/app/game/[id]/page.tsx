@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { useGameStore } from '@/store/gameStore';
 import { useGameState } from '@/hooks/useGameState';
@@ -16,6 +16,15 @@ export default function GamePage() {
   const gameState = useGameStore();
   const { fetchGameState } = useGameState(gameId);
   const [buildMode, setBuildMode] = useState<BuildMode>('none');
+
+  const isSetup = gameState.status === 'setup';
+  const humanSettlements = gameState.settlements.filter((s) => s.ownerId === 0).length;
+
+  // During the opening phase, the only action is placing settlements.
+  // Once it ends, clear the mode so normal play starts from a clean slate.
+  useEffect(() => {
+    setBuildMode(isSetup ? 'settlement' : 'none');
+  }, [isSetup]);
 
   if (gameState.loading && !gameState.gameId) {
     return (
@@ -48,11 +57,18 @@ export default function GamePage() {
         </div>
       </header>
 
+      {/* Setup banner */}
+      {isSetup && (
+        <div className="bg-amber-900/40 border-b border-amber-700/50 px-4 py-2 text-amber-100 text-sm text-center">
+          🏘️ Opening placement — click the board to place your starting settlements ({humanSettlements}/2). They grant your starting resources.
+        </div>
+      )}
+
       {/* Game Container */}
       <div className="flex flex-1 overflow-hidden gap-4 p-4">
         {/* Left: Game Board */}
         <div className="flex-1 bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
-          <GameBoard gameId={gameId} buildMode={buildMode} onBuildModeChange={setBuildMode} />
+          <GameBoard gameId={gameId} buildMode={buildMode} onBuildModeChange={setBuildMode} onActionComplete={fetchGameState} />
         </div>
 
         {/* Right Sidebar */}

@@ -36,6 +36,24 @@ export function useGameState(gameId: string | null, autoRefresh: boolean = true)
         })),
         settlementsCount: state.settlements_count,
         roadsCount: state.roads_count,
+        board: state.board.map((h) => ({
+          q: h.q,
+          r: h.r,
+          resource: h.resource,
+          diceNumber: h.dice_number,
+        })),
+        settlements: state.settlements.map((s) => ({
+          ownerId: s.owner_id,
+          color: s.color,
+          vertexCoords: s.vertex_coords,
+        })),
+        roads: state.roads.map((r) => ({
+          ownerId: r.owner_id,
+          color: r.color,
+          hex1: r.hex1,
+          hex2: r.hex2,
+        })),
+        setupComplete: state.setup_complete,
       });
       setError(null);
     } catch (err) {

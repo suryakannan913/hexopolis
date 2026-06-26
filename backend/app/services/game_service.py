@@ -35,19 +35,25 @@ class GameService:
     ) -> Tuple[bool, str]:
         """Place a settlement with validation. Returns (success, error_message)."""
         player = game.players[player_id]
+        is_setup = game.status == GameStatus.SETUP
+
+        # Vertex must be a real board location
+        if vertex not in game.board.get_all_vertices():
+            return False, "Invalid settlement location"
 
         # Check vertex is empty
         if any(s.vertex == vertex for s in game.settlements_on_board):
             return False, "Vertex is already occupied"
 
-        # Check adjacency rule: can't be adjacent to opponent settlements
+        # Distance rule: can't be adjacent to ANY existing settlement
         for settlement in game.settlements_on_board:
-            if settlement.owner_id != player_id:
-                if GameService._vertices_are_adjacent(game.board, vertex, settlement.vertex):
-                    return False, "Settlement too close to opponent settlement"
+            if GameService._vertices_are_adjacent(game.board, vertex, settlement.vertex):
+                return False, "Settlement too close to another settlement"
 
-        # In setup phase, allow placement. Otherwise check resources
-        if game.status != GameStatus.SETUP:
+        if not is_setup:
+            # Must connect to one of the player's own roads
+            if not GameService._player_connects_to_vertex(game, player_id, vertex):
+                return False, "Settlement must connect to one of your roads"
             if not player.can_afford(GameService.SETTLEMENT_COST):
                 return False, "Not enough resources to build settlement"
             player.pay_cost(GameService.SETTLEMENT_COST)
@@ -58,15 +64,81 @@ class GameService:
         player.settlements.append(settlement)
         player.points += 1
 
-        # Award resources from adjacent hexes (if not in setup, award immediately)
-        GameService._award_resources_for_settlement(game.board, player, settlement)
+        # Setup settlements grant a starting hand from adjacent hexes
+        if is_setup:
+            GameService._award_resources_for_settlement(game.board, player, settlement)
+            GameService._advance_setup(game)
 
         return True, ""
+
+    @staticmethod
+    def _advance_setup(game: Game) -> None:
+        """Drive the opening-placement phase.
+
+        The human places their settlements by clicking; once they have placed
+        their quota, the AI auto-places its settlements and the game begins.
+        """
+        per_player = GameService.INITIAL_SETTLEMENTS_PER_PLAYER
+        human = game.players[0]
+        ai = game.players[1]
+
+        if len(human.settlements) < per_player:
+            return  # Wait for the human to finish placing
+
+        # Human is done — let the AI claim its opening settlements
+        while len(ai.settlements) < per_player:
+            vertex = GameService._best_setup_vertex(game, ai.id)
+            if vertex is None:
+                break
+            GameService.place_settlement_setup_ai(game, ai.id, vertex)
+
+        # Opening placement complete: begin normal play with the human
+        game.status = GameStatus.IN_PROGRESS
+        game.current_player_id = 0
+        game.turn_number = 1
+
+    @staticmethod
+    def place_settlement_setup_ai(game: Game, player_id: int, vertex: Vertex) -> None:
+        """Directly place a free AI setup settlement (no setup re-entry)."""
+        player = game.players[player_id]
+        settlement = Settlement(owner_id=player_id, vertex=vertex)
+        game.settlements_on_board.append(settlement)
+        player.settlements.append(settlement)
+        player.points += 1
+        GameService._award_resources_for_settlement(game.board, player, settlement)
+
+    @staticmethod
+    def _best_setup_vertex(game: Game, player_id: int):
+        """Pick the highest-value legal opening vertex for the AI."""
+        best, best_score = None, -1.0
+        for vertex in game.board.get_all_vertices():
+            if any(s.vertex == vertex for s in game.settlements_on_board):
+                continue
+            if any(
+                GameService._vertices_are_adjacent(game.board, vertex, s.vertex)
+                for s in game.settlements_on_board
+            ):
+                continue
+            score = 0.0
+            for hex_obj in game.board.get_hexes_for_vertex(vertex):
+                if hex_obj.resource:
+                    score += 1.0
+                    if hex_obj.dice_number in (6, 8):
+                        score += 2.0
+                    elif hex_obj.dice_number in (5, 9):
+                        score += 1.0
+            if score > best_score:
+                best, best_score = vertex, score
+        return best
 
     @staticmethod
     def build_road(game: Game, player_id: int, edge: Edge) -> Tuple[bool, str]:
         """Build a road with validation. Returns (success, error_message)."""
         player = game.players[player_id]
+
+        # Edge must be a real board location
+        if edge not in game.board.get_all_edges():
+            return False, "Invalid road location"
 
         # Check edge is unoccupied
         if any(r.edge == edge for r in game.roads_on_board):
@@ -78,7 +150,7 @@ class GameService:
 
         # Check player has adjacent settlement or road
         if not GameService._player_can_build_on_edge(game, player_id, edge):
-            return False, "No settlement or road connected to this location"
+            return False, "Road must connect to your settlement or road"
 
         player.pay_cost(GameService.ROAD_COST)
         road = Road(owner_id=player_id, edge=edge)
@@ -166,70 +238,32 @@ class GameService:
 
     @staticmethod
     def _player_can_build_on_edge(game: Game, player_id: int, edge: Edge) -> bool:
-        """Check if player has a settlement or road adjacent to an edge."""
-        # Get hexes that share this edge
-        hexes = game.board.get_hexes_for_edge(edge)
+        """A road is buildable if it touches one of the player's settlements or roads."""
+        endpoints = game.board.get_edge_endpoints(edge)
+        endpoint_set = set(endpoints)
 
-        for hex_obj in hexes:
-            # Get vertices of this hex
-            vertices = game.board.get_vertices_for_hex(hex_obj.coord)
+        # Connected to one of the player's own settlements
+        for s in game.settlements_on_board:
+            if s.owner_id == player_id and s.vertex in endpoint_set:
+                return True
 
-            # Check each vertex
-            for vertex in vertices:
-                # Check if player has settlement here
-                if any(s.vertex == vertex and s.owner_id == player_id
-                       for s in game.settlements_on_board):
-                    return True
-
-                # Check if player has road adjacent to this vertex
-                edges_for_vertex = GameService._get_edges_for_vertex(
-                    game.board, vertex
-                )
-                for edge_near_vertex in edges_for_vertex:
-                    if any(r.edge == edge_near_vertex and r.owner_id == player_id
-                           for r in game.roads_on_board):
-                        return True
+        # Connected to one of the player's own roads (shares an endpoint vertex)
+        for r in game.roads_on_board:
+            if r.owner_id != player_id:
+                continue
+            if endpoint_set & set(game.board.get_edge_endpoints(r.edge)):
+                return True
 
         return False
 
     @staticmethod
-    def _get_edges_for_vertex(board: Board, vertex: Vertex) -> List[Edge]:
-        """Get all edges that have this vertex as an endpoint."""
-        edges = []
-        for edge in board.get_all_edges():
-            # Check if vertex is shared by the two hexes of the edge
-            if vertex in [
-                Vertex((edge.hex1, edge.hex2, h.coord))
-                for h in board.get_hexes_for_edge(edge)
-            ]:
-                # This is a simplification - proper implementation would check
-                # if the vertex is actually an endpoint of the edge
-                pass
-        # For MVP, simplified: just return edges adjacent to the hexes in the vertex
-        edges_set = set()
-        for hex_coord in vertex.hex_coords:
-            if board.hex_exists(hex_coord):
-                edges_set.update(board.get_edges_for_hex(hex_coord))
-        return list(edges_set)
-
-    @staticmethod
-    def get_valid_settlement_vertices(game: Game, player_id: int) -> List[Vertex]:
-        """Get all vertices where a player can place a settlement."""
-        valid = []
-        for vertex in game.board.get_all_vertices():
-            success, _ = GameService.place_settlement(game, player_id, vertex)
-            if success:
-                valid.append(vertex)
-                # Undo the placement
-                game.settlements_on_board = [
-                    s for s in game.settlements_on_board if s.vertex != vertex
-                ]
-                player = game.players[player_id]
-                player.settlements = [
-                    s for s in player.settlements if s.vertex != vertex
-                ]
-                player.points -= 1
-        return valid
+    def _player_connects_to_vertex(game: Game, player_id: int, vertex: Vertex) -> bool:
+        """A settlement (in normal play) must sit on one of the player's roads."""
+        incident_edges = set(game.board.get_edges_for_vertex(vertex))
+        return any(
+            r.owner_id == player_id and r.edge in incident_edges
+            for r in game.roads_on_board
+        )
 
     @staticmethod
     def execute_ai_turn(game: Game, player_id: int) -> None:

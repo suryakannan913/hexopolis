@@ -81,8 +81,15 @@ class AIEvaluator:
                     )
                     moves.append(move)
 
-        # 2. Road moves (if can afford)
-        if player.can_afford(GameService.ROAD_COST):
+        # 2. Road moves — only build roads to enable future settlements, and
+        #    cap them so the AI doesn't hoard roads instead of settling.
+        has_settlement_move = any(m.move_type == "settlement" for m in moves)
+        road_budget = len(player.settlements) * 2 + 1
+        if (
+            player.can_afford(GameService.ROAD_COST)
+            and not has_settlement_move
+            and len(player.roads) < road_budget
+        ):
             for edge in game.board.get_all_edges():
                 if self._can_build_road(game, player_id, edge):
                     move = Move(
@@ -149,27 +156,32 @@ class AIEvaluator:
 
     def _can_place_settlement(self, game: Game, player_id: int, vertex: Vertex) -> bool:
         """Check if settlement can be placed (without modifying game state)."""
+        from app.services.game_service import GameService
+
         # Check vertex is empty
         if any(s.vertex == vertex for s in game.settlements_on_board):
             return False
 
-        # Check adjacency rule
+        # Distance rule: not adjacent to ANY settlement
         for settlement in game.settlements_on_board:
-            if settlement.owner_id != player_id:
-                if self._vertices_are_adjacent(vertex, settlement.vertex):
-                    return False
+            if self._vertices_are_adjacent(vertex, settlement.vertex):
+                return False
+
+        # Outside setup, must connect to one of the player's own roads
+        if game.status.value != "setup":
+            return GameService._player_connects_to_vertex(game, player_id, vertex)
 
         return True
 
     def _can_build_road(self, game: Game, player_id: int, edge: Edge) -> bool:
         """Check if road can be built (without modifying game state)."""
+        from app.services.game_service import GameService
+
         # Check edge is unoccupied
         if any(r.edge == edge for r in game.roads_on_board):
             return False
 
-        # Simplified: just check player has settlement or road adjacent
-        player = game.players[player_id]
-        return len(player.settlements) > 0 or len(player.roads) > 0
+        return GameService._player_can_build_on_edge(game, player_id, edge)
 
     def _score_settlement(self, game: Game, player_id: int, vertex: Vertex) -> float:
         """Score the value of placing a settlement at a vertex."""
@@ -256,20 +268,21 @@ class AIPlayer:
         self.evaluator = evaluator or AIEvaluator()
 
     def take_turn(self, game: Game) -> None:
-        """Execute a full AI turn."""
+        """Execute a full AI turn: roll, then build until nothing useful remains."""
         from app.services.game_service import GameService
 
-        # Roll dice
+        # Roll dice and collect resources
         dice_roll = GameService.roll_dice(game)
         GameService.distribute_resources(game, dice_roll)
 
-        # Generate and execute best move
-        move = self.evaluator.choose_best_move(game, self.player_id)
-        self.evaluator.execute_move(game, self.player_id, move)
+        # Keep taking build/trade actions until only end_turn is best (or cap out)
+        for _ in range(10):
+            move = self.evaluator.choose_best_move(game, self.player_id)
+            if move.move_type == "end_turn":
+                break
+            if not self.evaluator.execute_move(game, self.player_id, move):
+                break  # Move failed validation; stop to avoid looping
+            if GameService.check_win_condition(game):
+                return  # Game over — leave turn with the winner
 
-        # Check win condition
-        GameService.check_win_condition(game)
-
-        # End turn only if move wasn't already end_turn
-        if move.move_type != "end_turn":
-            GameService.end_turn(game)
+        GameService.end_turn(game)

@@ -3,6 +3,7 @@ from typing import Dict
 from app.models.game import Game
 from app.models.board import HexCoord, Vertex, Edge, Resource
 from app.services.game_service import GameService
+from app.models.game import GameStatus
 from app.schemas.game_schema import (
     GameCreateRequest,
     GameCreateResponse,
@@ -15,6 +16,9 @@ from app.schemas.game_schema import (
     EndTurnResponse,
     GameStateSchema,
     PlayerSchema,
+    BoardHexSchema,
+    BoardSettlementSchema,
+    BoardRoadSchema,
 )
 
 router = APIRouter(prefix="/game", tags=["game"])
@@ -48,6 +52,36 @@ def _game_state_to_schema(game: Game) -> GameStateSchema:
             )
         )
 
+    # Serialize the board so the frontend renders the real layout
+    board_schema = [
+        BoardHexSchema(
+            q=hex_obj.coord.q,
+            r=hex_obj.coord.r,
+            resource=hex_obj.resource.value if hex_obj.resource else None,
+            dice_number=hex_obj.dice_number,
+        )
+        for hex_obj in game.board.hexes.values()
+    ]
+
+    settlements_schema = [
+        BoardSettlementSchema(
+            owner_id=s.owner_id,
+            color=game.players[s.owner_id].color,
+            vertex_coords=[(h.q, h.r) for h in s.vertex.hex_coords],
+        )
+        for s in game.settlements_on_board
+    ]
+
+    roads_schema = [
+        BoardRoadSchema(
+            owner_id=r.owner_id,
+            color=game.players[r.owner_id].color,
+            hex1=(r.edge.hex1.q, r.edge.hex1.r),
+            hex2=(r.edge.hex2.q, r.edge.hex2.r),
+        )
+        for r in game.roads_on_board
+    ]
+
     return GameStateSchema(
         id=game.id,
         status=game.status.value,
@@ -58,6 +92,10 @@ def _game_state_to_schema(game: Game) -> GameStateSchema:
         players=players_schema,
         settlements_count=len(game.settlements_on_board),
         roads_count=len(game.roads_on_board),
+        board=board_schema,
+        settlements=settlements_schema,
+        roads=roads_schema,
+        setup_complete=game.status != GameStatus.SETUP,
     )
 
 
@@ -88,6 +126,13 @@ def roll_dice(game_id: str) -> RollDiceResponse:
     """Roll dice and distribute resources."""
     game = _get_game_or_404(game_id)
 
+    if game.status == GameStatus.SETUP:
+        raise HTTPException(status_code=400, detail="Place your starting settlements first")
+    if game.status == GameStatus.WON:
+        raise HTTPException(status_code=400, detail="Game is over")
+    if game.last_dice_roll is not None:
+        raise HTTPException(status_code=400, detail="You already rolled this turn")
+
     # Roll dice
     roll = GameService.roll_dice(game)
 
@@ -104,6 +149,10 @@ def build_settlement(
     """Place a settlement on the board."""
     game = _get_game_or_404(game_id)
     player = game.get_current_player()
+    if game.status == GameStatus.WON:
+        raise HTTPException(status_code=400, detail="Game is over")
+    if player.player_type.value == "ai":
+        raise HTTPException(status_code=400, detail="It's not your turn")
 
     # Convert coords to Vertex
     hex_coords = tuple(HexCoord(q, r) for q, r in request.vertex_coords)
@@ -126,6 +175,12 @@ def build_road(game_id: str, request: BuildRoadRequest) -> BuildResponse:
     """Build a road on the board."""
     game = _get_game_or_404(game_id)
     player = game.get_current_player()
+    if game.status == GameStatus.WON:
+        raise HTTPException(status_code=400, detail="Game is over")
+    if player.player_type.value == "ai":
+        raise HTTPException(status_code=400, detail="It's not your turn")
+    if game.status == GameStatus.SETUP:
+        raise HTTPException(status_code=400, detail="Roads can't be built during setup")
 
     # Convert coords to Edge
     hex1 = HexCoord(*request.hex1_coords)
@@ -170,6 +225,9 @@ def execute_trade(game_id: str, request: TradeRequest) -> TradeResponse:
 def end_turn(game_id: str) -> EndTurnResponse:
     """End current player's turn."""
     game = _get_game_or_404(game_id)
+
+    if game.status == GameStatus.SETUP:
+        raise HTTPException(status_code=400, detail="Finish placing your starting settlements first")
 
     GameService.end_turn(game)
     next_player = game.get_current_player()
