@@ -10,8 +10,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Python build dirs — scoped to the backend so they don't swallow frontend/lib
+backend/lib/
+backend/lib64/
 parts/
 sdist/
 var/
