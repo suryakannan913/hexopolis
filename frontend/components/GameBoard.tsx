@@ -15,7 +15,6 @@ import {
   getVertexPixelCoord,
   drawSettlement,
   drawRoad,
-  isPointNearVertex,
   isPointNearEdge,
   type HexCoord,
   type PixelCoord,
@@ -105,7 +104,10 @@ export default function GameBoard({ gameId, buildMode = 'none', onBuildModeChang
       }
       setHoveredVertex(null);
       setHoveredEdge(null);
-      onBuildModeChange?.('none');
+      // Keep placing during opening setup (need 2 settlements); otherwise exit build mode
+      if (gameState.status !== 'setup') {
+        onBuildModeChange?.('none');
+      }
       onActionComplete?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to build');
@@ -128,7 +130,47 @@ export default function GameBoard({ gameId, buildMode = 'none', onBuildModeChang
     const originX = canvas.width / 2;
     const originY = canvas.height / 2;
 
-    // Check hexes
+    // In build mode, vertex/edge snapping takes priority — these sit on hex
+    // corners/edges, which are *inside* hexes, so a hex-first check would
+    // always win and the vertex would never register.
+    if (buildMode === 'settlement') {
+      // Pick the nearest vertex within range (corners are shared, so compare)
+      let best: Vertex | null = null;
+      let bestDist = Infinity;
+      for (const vertex of allVertices) {
+        const pv = getVertexPixelCoord(vertex, originX, originY);
+        const d = Math.hypot(pixelCoord.x - pv.x, pixelCoord.y - pv.y);
+        if (d <= 16 && d < bestDist) {
+          best = vertex;
+          bestDist = d;
+        }
+      }
+      setHoveredVertex(best);
+      setHoveredHex(null);
+      setHoveredEdge(null);
+      return;
+    }
+
+    if (buildMode === 'road') {
+      let best: Edge | null = null;
+      let bestDist = Infinity;
+      for (const edge of allEdges) {
+        const p1 = hexToPixel(edge.hex1, originX, originY);
+        const p2 = hexToPixel(edge.hex2, originX, originY);
+        const mid = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+        const d = Math.hypot(pixelCoord.x - mid.x, pixelCoord.y - mid.y);
+        if (isPointNearEdge(pixelCoord, p1, p2, 10) && d < bestDist) {
+          best = edge;
+          bestDist = d;
+        }
+      }
+      setHoveredEdge(best);
+      setHoveredHex(null);
+      setHoveredVertex(null);
+      return;
+    }
+
+    // Not building: just highlight the hovered hex
     for (const hexData of boardHexes) {
       const pixelHex = hexToPixel(hexData.coord, originX, originY);
       if (isPointInHex(pixelCoord, pixelHex)) {
@@ -136,33 +178,6 @@ export default function GameBoard({ gameId, buildMode = 'none', onBuildModeChang
         setHoveredVertex(null);
         setHoveredEdge(null);
         return;
-      }
-    }
-
-    // Check vertices (settlements)
-    if (buildMode === 'settlement') {
-      for (const vertex of allVertices) {
-        const pixelVertex = getVertexPixelCoord(vertex, originX, originY);
-        if (isPointNearVertex(pixelCoord, pixelVertex)) {
-          setHoveredVertex(vertex);
-          setHoveredHex(null);
-          setHoveredEdge(null);
-          return;
-        }
-      }
-    }
-
-    // Check edges (roads)
-    if (buildMode === 'road') {
-      for (const edge of allEdges) {
-        const p1 = hexToPixel(edge.hex1, originX, originY);
-        const p2 = hexToPixel(edge.hex2, originX, originY);
-        if (isPointNearEdge(pixelCoord, p1, p2)) {
-          setHoveredEdge(edge);
-          setHoveredHex(null);
-          setHoveredVertex(null);
-          return;
-        }
       }
     }
 
