@@ -18,7 +18,7 @@ class GameService:
         Resource.WOOD: 1,
         Resource.BRICK: 1,
     }
-    WINNING_POINTS = 10
+    WINNING_POINTS = 15  # 1v1 target (CATAN_1V1_RULES.md §12 / D8)
     INITIAL_SETTLEMENTS_PER_PLAYER = 2
 
     @staticmethod

@@ -3,6 +3,7 @@ from app.models.game import Game, Resource, GameStatus, PlayerType
 from app.models.board import HexCoord, Vertex, Edge
 from app.ai.evaluator import AIEvaluator, AIPlayer, Move
 from app.services.game_service import GameService
+from tests._engine_helpers import place_free_setup_settlement, extend_two_roads
 
 
 class TestAIEvaluator:
@@ -82,12 +83,20 @@ class TestAIEvaluator:
         assert len(settlement_moves) == 0
 
     def test_generate_moves_settlement_with_resources(self):
-        """Test settlements available with resources."""
+        """Settlement moves are generated when a legal, connected, affordable spot exists."""
         game = GameService.create_game("test", "Human")
+        place_free_setup_settlement(game, 0)
         game.status = GameStatus.IN_PROGRESS
         player = game.players[0]
+        for r in Resource:
+            player.resources[r] = 0
 
-        # Give resources for settlement
+        # Build a road path to a legal spot, then hold settlement resources.
+        player.add_resource(Resource.WOOD, 2)
+        player.add_resource(Resource.BRICK, 2)
+        e1, e2, _ = extend_two_roads(game, 0)
+        GameService.build_road(game, 0, e1)
+        GameService.build_road(game, 0, e2)
         for r in [Resource.WOOD, Resource.BRICK, Resource.WHEAT, Resource.SHEEP]:
             player.add_resource(r, 1)
 
@@ -95,7 +104,7 @@ class TestAIEvaluator:
         moves = evaluator.generate_moves(game, 0)
         settlement_moves = [m for m in moves if m.move_type == "settlement"]
 
-        # Should have settlement moves with resources
+        # A connected, affordable, distance-legal spot should surface as a move.
         assert len(settlement_moves) > 0
 
     def test_generate_moves_road_requires_resources(self):
@@ -221,7 +230,9 @@ class TestAIPlayer:
     def test_ai_take_turn_completes(self):
         """Test AI can complete a full turn."""
         game = GameService.create_game("test", "Human")
-        # Ensure it's AI's turn
+        # Run the AI turn in normal play (not setup) so turn advancement is
+        # deterministic and not short-circuited by free setup placements.
+        game.status = GameStatus.IN_PROGRESS
         game.current_player_id = 1
         game.players[1].player_type = PlayerType.AI
 

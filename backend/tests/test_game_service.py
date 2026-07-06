@@ -2,6 +2,7 @@ import pytest
 from app.models.game import Game, Resource, GameStatus
 from app.models.board import HexCoord, Vertex, Edge
 from app.services.game_service import GameService
+from tests._engine_helpers import place_free_setup_settlement, extend_two_roads
 
 
 class TestGameService:
@@ -52,36 +53,45 @@ class TestGameService:
             assert success is False
 
     def test_place_settlement_costs_resources(self):
-        """Test settlement placement costs resources outside setup."""
+        """Settlement placement in normal play deducts resources (needs a road link)."""
         game = GameService.create_game("game-1", "Alice")
-        game.status = GameStatus.IN_PROGRESS  # Exit setup phase
-        player = game.players[0]
-
-        # Give player resources
-        for resource in [Resource.WOOD, Resource.BRICK, Resource.WHEAT, Resource.SHEEP]:
-            player.add_resource(resource, 1)
-
-        vertices = list(game.board.get_all_vertices())
-        vertex = vertices[0]
-
-        initial_resources = sum(player.resources.values())
-        success, error = GameService.place_settlement(game, 0, vertex)
-        final_resources = sum(player.resources.values())
-
-        assert success is True
-        assert final_resources < initial_resources
-
-    def test_place_settlement_insufficient_resources(self):
-        """Test settlement placement fails without resources."""
-        game = GameService.create_game("game-1", "Alice")
+        place_free_setup_settlement(game)          # free during setup
         game.status = GameStatus.IN_PROGRESS
         player = game.players[0]
-        # Don't give resources
+        for r in Resource:                          # clear setup starting hand
+            player.resources[r] = 0
+        # Fund two roads to reach a legal spot, plus one settlement.
+        player.add_resource(Resource.WOOD, 3)
+        player.add_resource(Resource.BRICK, 3)
+        player.add_resource(Resource.WHEAT, 1)
+        player.add_resource(Resource.SHEEP, 1)
 
-        vertices = list(game.board.get_all_vertices())
-        vertex = vertices[0]
+        e1, e2, target = extend_two_roads(game, 0)
+        assert GameService.build_road(game, 0, e1)[0]
+        assert GameService.build_road(game, 0, e2)[0]
 
-        success, error = GameService.place_settlement(game, 0, vertex)
+        before = sum(player.resources.values())
+        success, error = GameService.place_settlement(game, 0, target)
+        assert success is True, error
+        assert sum(player.resources.values()) < before
+
+    def test_place_settlement_insufficient_resources(self):
+        """Settlement placement fails without resources, even when properly connected."""
+        game = GameService.create_game("game-1", "Alice")
+        place_free_setup_settlement(game)
+        game.status = GameStatus.IN_PROGRESS
+        player = game.players[0]
+        for r in Resource:
+            player.resources[r] = 0
+        # Fund only the two roads; leave nothing for the settlement itself.
+        player.add_resource(Resource.WOOD, 2)
+        player.add_resource(Resource.BRICK, 2)
+
+        e1, e2, target = extend_two_roads(game, 0)
+        assert GameService.build_road(game, 0, e1)[0]
+        assert GameService.build_road(game, 0, e2)[0]
+
+        success, error = GameService.place_settlement(game, 0, target)
         assert success is False
         assert "resources" in error.lower()
 
@@ -189,9 +199,9 @@ class TestGameService:
         assert winner is None
 
     def test_check_win_condition_player_wins(self):
-        """Test win condition when someone reaches 10 points."""
+        """Test win condition when someone reaches the 15-point target."""
         game = GameService.create_game("game-1", "Alice")
-        game.players[0].points = 10
+        game.players[0].points = GameService.WINNING_POINTS
 
         winner = GameService.check_win_condition(game)
         assert winner == 0

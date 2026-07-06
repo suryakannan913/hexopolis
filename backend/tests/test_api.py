@@ -1,8 +1,30 @@
 import pytest
 from fastapi.testclient import TestClient
 from main import app
+from app.models.game import Game
+from app.services.game_service import GameService
 
 client = TestClient(app)
+
+
+def _finish_setup(game_id):
+    """Complete opening placement via the API so the game reaches in_progress.
+
+    Places two non-adjacent human settlements; on the second, the engine
+    auto-places the AI's settlements and starts normal play.
+    """
+    board = Game.create("scratch", "x").board  # identical fixed board layout
+    placed = []
+    for v in board.get_all_vertices():
+        if len(placed) == 2:
+            break
+        if any(GameService._vertices_are_adjacent(board, v, p) for p in placed):
+            continue
+        coords = [[h.q, h.r] for h in v.hex_coords]
+        r = client.post(f"/game/{game_id}/build-settlement", json={"vertex_coords": coords})
+        if r.status_code == 200:
+            placed.append(v)
+    return placed
 
 
 class TestGameAPI:
@@ -63,6 +85,7 @@ class TestGameAPI:
             "/game/new", json={"player_name": "Alice"}
         )
         game_id = create_response.json()["game_id"]
+        _finish_setup(game_id)  # rolling is only legal once play begins
 
         # Roll dice
         response = client.post(f"/game/{game_id}/roll-dice")
@@ -138,6 +161,7 @@ class TestGameAPI:
             "/game/new", json={"player_name": "Alice"}
         )
         game_id = create_response.json()["game_id"]
+        _finish_setup(game_id)  # can't end a turn during setup
 
         # End turn
         response = client.post(f"/game/{game_id}/end-turn")
@@ -170,6 +194,7 @@ class TestGameAPI:
         )
         game_id = create_response.json()["game_id"]
         assert create_response.status_code == 201
+        _finish_setup(game_id)  # reach in_progress before the turn sequence
 
         # Get initial state
         state1 = client.get(f"/game/{game_id}").json()
@@ -195,6 +220,7 @@ class TestGameAPI:
             "/game/new", json={"player_name": "Alice"}
         )
         game_id = create_response.json()["game_id"]
+        _finish_setup(game_id)  # reach in_progress (human's turn)
 
         # End human turn to switch to AI
         client.post(f"/game/{game_id}/end-turn")
