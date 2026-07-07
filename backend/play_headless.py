@@ -1,44 +1,38 @@
+"""Headless Hexopolis — play a complete 1v1 Catan game through the engine.
+
+No UI, no web server: this drives app.engine directly, renders the board as
+text, plays a full self-play game to a real 15-VP win, and then proves
+reproducibility by replaying the same seed.
+
+Usage (from backend/):
+    python3 play_headless.py [seed]
 """
-Headless Hexopolis — play the game purely through the logic layer.
+import random
+import sys
 
-No UI, no web server, no HTTP: this imports the game logic directly and
-renders the board + state as text. It's a probe to demonstrate that the
-rules engine can run on its own.
+from app.engine import (
+    CITY,
+    WINNING_POINTS,
+    Phase,
+    apply_action,
+    legal_actions,
+    new_game,
+)
+from app.engine.policy import choose_action
+from app.models.board import Resource
 
-Run from the backend/ directory:
-    python3 play_headless.py
-"""
-from app.models.board import HexCoord, Vertex, Resource
-from app.models.game import Game, GameStatus
-from app.services.game_service import GameService
-
-
-# ---------- text rendering ----------
-
-RES_SHORT = {
-    Resource.WOOD: "wood",
-    Resource.WHEAT: "wheat",
-    Resource.ORE: "ore",
-    Resource.BRICK: "brick",
-    Resource.SHEEP: "sheep",
-}
 CELL = 9
-ROW_ORDER = [-2, -1, 0, 1, 2]  # board rows, top to bottom (axial r)
+ROW_ORDER = [-2, -1, 0, 1, 2]  # axial r, top to bottom
+ICON = {Resource.WOOD: "wood", Resource.WHEAT: "wheat", Resource.ORE: "ore",
+        Resource.BRICK: "brick", Resource.SHEEP: "sheep", None: "desert"}
 
 
-def _cell(text):
-    return text.center(CELL)
-
-
-def render_board(game) -> str:
-    """Render the 19-hex board as staggered text rows (3-4-5-4-3)."""
-    hexes = list(game.board.hexes.values())
+def render_board(state) -> str:
     rows = {}
-    for h in hexes:
+    for h in state.board.hexes.values():
         rows.setdefault(h.coord.r, []).append(h)
     for r in rows:
-        rows[r].sort(key=lambda h: h.coord.q + h.coord.r / 2)  # left-to-right
-
+        rows[r].sort(key=lambda h: h.coord.q + h.coord.r / 2)
     width = max(len(v) for v in rows.values())
     lines = []
     for r in ROW_ORDER:
@@ -46,131 +40,68 @@ def render_board(game) -> str:
         indent = " " * ((width - len(row)) * CELL // 2)
         res_line, num_line = [], []
         for h in row:
-            if h.dice_number == 7 or h.resource is None:
-                res_line.append(_cell("desert"))
-                num_line.append(_cell("( 7R )"))
-            else:
-                res_line.append(_cell(RES_SHORT[h.resource]))
-                n = h.dice_number
-                tok = f"{n}*" if n in (6, 8) else str(n)  # * = high odds
-                num_line.append(_cell(f"({tok})"))
-        lines.append(indent + "".join(res_line))
-        lines.append(indent + "".join(num_line))
-        lines.append("")
+            robber = " R" if h.coord == state.robber else ""
+            res_line.append((ICON[h.resource] + robber).center(CELL))
+            num = "--" if h.dice_number is None else str(h.dice_number)
+            num_line.append(f"({num})".center(CELL))
+        lines += [indent + "".join(res_line), indent + "".join(num_line), ""]
     return "\n".join(lines)
 
 
-def _vkey(vertex: Vertex) -> str:
-    cs = sorted((h.q, h.r) for h in vertex.hex_coords)
-    return "/".join(f"({q},{r})" for q, r in cs)
-
-
-def render_state(game) -> str:
-    out = []
-    status = game.status.value
-    cur = game.get_current_player()
-    out.append(f"status={status}  turn={game.turn_number}  "
-               f"current={cur.name}  last_roll={game.last_dice_roll}")
-    for p in game.players:
-        res = " ".join(f"{RES_SHORT[r][:2]}:{p.resources[r]}" for r in Resource)
-        out.append(f"  [{p.player_type.value:5}] {p.name:12} pts={p.points}  "
-                   f"settlements={len(p.settlements)} roads={len(p.roads)}  | {res}")
-    if game.settlements_on_board:
-        out.append("  Settlements:")
-        for s in game.settlements_on_board:
-            out.append(f"    P{s.owner_id} @ {_vkey(s.vertex)}")
-    if game.roads_on_board:
-        out.append("  Roads:")
-        for rd in game.roads_on_board:
-            e = rd.edge
-            out.append(f"    P{rd.owner_id} @ ({e.hex1.q},{e.hex1.r})-({e.hex2.q},{e.hex2.r})")
+def summary(state) -> str:
+    out = [f"phase={state.phase.value} turn={state.turn_number} "
+           f"current=P{state.current_player} last_roll={state.last_roll}"]
+    for p in state.players:
+        res = " ".join(f"{r.value[:2]}:{p.resources[r]}" for r in Resource)
+        builds = sum(1 for _, (o, k) in state.buildings.items() if o == p.id and k != CITY)
+        cities = sum(1 for _, (o, k) in state.buildings.items() if o == p.id and k == CITY)
+        out.append(
+            f"  P{p.id} {p.name:<10} visibleVP={state.visible_vp(p.id):>2} "
+            f"totalVP={state.total_vp(p.id):>2} | settle={builds} city={cities} "
+            f"roads={15 - p.roads_left} knights={p.knights_played} | {res}"
+        )
+    out.append(f"  LongestRoad={state.longest_road_owner} LargestArmy={state.largest_army_owner} "
+               f"bank={{{', '.join(f'{r.value[:2]}:{n}' for r, n in state.bank.items())}}}")
     return "\n".join(out)
 
 
-def banner(title):
-    print("\n" + "=" * 64)
-    print(title)
-    print("=" * 64)
-
-
-# ---------- driving the game through the logic layer ----------
-
-def first_legal_setup_vertex(game, player_id):
-    """Pick a legal opening-settlement vertex (no UI, just the rules)."""
-    best, best_score = None, -1
-    for v in game.board.get_all_vertices():
-        if any(s.vertex == v for s in game.settlements_on_board):
-            continue
-        if any(GameService._vertices_are_adjacent(game.board, v, s.vertex)
-               for s in game.settlements_on_board):
-            continue
-        # prefer vertices touching more producing hexes
-        score = sum(1 for h in game.board.get_hexes_for_vertex(v) if h.resource)
-        if score > best_score:
-            best, best_score = v, score
-    return best
-
-
-def try_build_something(game, player_id):
-    """Attempt one road then one settlement for the human, if legal/affordable."""
-    player = game.players[player_id]
-    log = []
-    # road off an existing settlement
-    for s in player.settlements:
-        for edge in game.board.get_edges_for_vertex(s.vertex):
-            ok, err = GameService.build_road(game, player_id, edge)
-            if ok:
-                log.append(f"built road @ ({edge.hex1.q},{edge.hex1.r})-({edge.hex2.q},{edge.hex2.r})")
-                break
-        if log:
-            break
-    return log
+def play(seed: int):
+    state = new_game(("Blue", "Red"), seed=seed)
+    rng = random.Random(seed)  # policy randomness, separate stream from the game's
+    plies = 0
+    while not state.is_terminal() and plies < 30_000:
+        acts = legal_actions(state)
+        apply_action(state, choose_action(state, acts, rng), validate=False)
+        plies += 1
+    return state, plies
 
 
 def main():
-    banner("NEW GAME (created via GameService — no UI involved)")
-    game = GameService.create_game("headless-1", "ScriptPlayer")
-    print(render_board(game))
-    print(render_state(game))
+    seed = int(sys.argv[1]) if len(sys.argv) > 1 else 42
+    print(f"=== New game (seed={seed}) ===")
+    state = new_game(("Blue", "Red"), seed=seed)
+    print(render_board(state))
+    print(summary(state))
 
-    # --- opening placement: human places 2, engine auto-places AI ---
-    banner("OPENING PLACEMENT")
-    for i in range(GameService.INITIAL_SETTLEMENTS_PER_PLAYER):
-        v = first_legal_setup_vertex(game, 0)
-        ok, err = GameService.place_settlement(game, 0, v)
-        print(f"  human places settlement {i+1} -> {'OK' if ok else 'FAIL: ' + err} @ {_vkey(v)}")
-    print()
-    print(render_board(game))
-    print(render_state(game))
+    print("\n=== Self-play to completion (heuristic policy, both seats) ===")
+    state, plies = play(seed)
+    print(render_board(state))
+    print(summary(state))
+    if state.winner is None:
+        print(f"\nNo winner within {plies} plies — this should not happen; "
+              f"win target is {WINNING_POINTS}.")
+        sys.exit(1)
+    w = state.players[state.winner]
+    print(f"\n>>> {w.name} (P{w.id}) WINS with {state.total_vp(w.id)} VP "
+          f"on turn {state.turn_number} ({plies} decisions).")
 
-    # --- play turns until someone wins or we hit a turn cap ---
-    banner("PLAYING TURNS")
-    TURN_CAP = 30
-    while game.status != GameStatus.WON and game.turn_number <= TURN_CAP:
-        cur = game.get_current_player()
-        if cur.player_type.value == "human":
-            roll = GameService.roll_dice(game)
-            GameService.distribute_resources(game, roll)
-            line = f"Turn {game.turn_number}: {cur.name} rolled {roll}"
-            builds = try_build_something(game, 0)
-            if builds:
-                line += " | " + "; ".join(builds)
-            print(line)
-            GameService.end_turn(game)
-        else:
-            GameService.execute_ai_turn(game, cur.id)
-            print(f"Turn {game.turn_number - 1}: {cur.name} took its turn "
-                  f"(pts={cur.points}, settlements={len(cur.settlements)}, roads={len(cur.roads)})")
-
-    banner("FINAL STATE")
-    print(render_board(game))
-    print(render_state(game))
-    if game.status == GameStatus.WON:
-        winner = max(game.players, key=lambda p: p.points)
-        print(f"\n>>> {winner.name} wins with {winner.points} points!")
-    else:
-        print(f"\n>>> Reached turn cap ({TURN_CAP}); no winner yet "
-              f"(win target is {GameService.WINNING_POINTS} points).")
+    # Reproducibility: the same seed must replay to the identical outcome.
+    again, plies2 = play(seed)
+    same = (again.winner, again.turn_number, plies2) == (state.winner, state.turn_number, plies)
+    print(f">>> Reproducibility check (same seed, fresh game): "
+          f"{'IDENTICAL' if same else 'MISMATCH'} "
+          f"(winner={again.winner}, turns={again.turn_number}, decisions={plies2})")
+    sys.exit(0 if same else 1)
 
 
 if __name__ == "__main__":

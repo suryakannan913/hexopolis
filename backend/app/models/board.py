@@ -96,35 +96,46 @@ class Hex:
         return False
 
 
+# The 19 axial coordinates of the standard board, center-out:
+#       0   1   2
+#     3   4   5   6
+#   7   8   9  10  11
+#     12  13  14  15
+#       16  17  18
+STANDARD_COORDS = [
+    # Center
+    HexCoord(0, 0),
+    # Ring 1 (6 hexes)
+    HexCoord(1, 0), HexCoord(1, -1), HexCoord(0, -1),
+    HexCoord(-1, 0), HexCoord(-1, 1), HexCoord(0, 1),
+    # Ring 2 (12 hexes)
+    HexCoord(2, 0), HexCoord(2, -1), HexCoord(2, -2),
+    HexCoord(1, -2), HexCoord(0, -2), HexCoord(-1, -1),
+    HexCoord(-2, 0), HexCoord(-2, 1), HexCoord(-2, 2),
+    HexCoord(-1, 2), HexCoord(0, 2), HexCoord(1, 1),
+]
+
+
 class Board:
     """Hexagonal board with 19 hexes (standard Catan layout)."""
 
-    def __init__(self):
-        """Initialize board with 19 hexes in standard Catan pattern."""
+    def __init__(self, layout: Optional[List[Tuple[HexCoord, Optional[Resource], Optional[int]]]] = None):
+        """Initialize the board.
+
+        layout: optional list of (coord, resource, dice_number) — used by the
+        engine's random board generator. resource=None means desert (no number).
+        When omitted, the legacy fixed layout is used (geometry tests only).
+        """
         self.hexes: Dict[HexCoord, Hex] = {}
-        self._init_hexes()
+        if layout is None:
+            self._init_hexes()
+        else:
+            for coord, resource, number in layout:
+                self.hexes[coord] = Hex(coord, resource, number)
 
     def _init_hexes(self):
-        """Create 19 hexes in standard Catan layout using axial coordinates.
-        Layout (numbers are ring distance):
-              0   1   2
-            3   4   5   6
-          7   8   9  10  11
-            12  13  14  15
-              16  17  18
-        """
-        coords = [
-            # Center
-            HexCoord(0, 0),
-            # Ring 1 (6 hexes)
-            HexCoord(1, 0), HexCoord(1, -1), HexCoord(0, -1),
-            HexCoord(-1, 0), HexCoord(-1, 1), HexCoord(0, 1),
-            # Ring 2 (12 hexes)
-            HexCoord(2, 0), HexCoord(2, -1), HexCoord(2, -2),
-            HexCoord(1, -2), HexCoord(0, -2), HexCoord(-1, -1),
-            HexCoord(-2, 0), HexCoord(-2, 1), HexCoord(-2, 2),
-            HexCoord(-1, 2), HexCoord(0, 2), HexCoord(1, 1),
-        ]
+        """Create 19 hexes in the legacy fixed layout (see STANDARD_COORDS)."""
+        coords = STANDARD_COORDS
         resources = [
             Resource.WHEAT,  # 0
             Resource.SHEEP, Resource.ORE, Resource.BRICK,  # 1-3

@@ -1,245 +1,89 @@
-import pytest
+"""API layer tests — the routes are a thin adapter over app.engine."""
 from fastapi.testclient import TestClient
+
 from main import app
-from app.models.game import Game
-from app.services.game_service import GameService
 
 client = TestClient(app)
 
 
-def _finish_setup(game_id):
-    """Complete opening placement via the API so the game reaches in_progress.
+def _create(seed=99, name="Alice"):
+    resp = client.post("/game/new", json={"player_name": name, "seed": seed})
+    assert resp.status_code == 201
+    return resp.json()
 
-    Places two non-adjacent human settlements; on the second, the engine
-    auto-places the AI's settlements and starts normal play.
-    """
-    board = Game.create("scratch", "x").board  # identical fixed board layout
-    placed = []
-    for v in board.get_all_vertices():
-        if len(placed) == 2:
-            break
-        if any(GameService._vertices_are_adjacent(board, v, p) for p in placed):
-            continue
-        coords = [[h.q, h.r] for h in v.hex_coords]
-        r = client.post(f"/game/{game_id}/build-settlement", json={"vertex_coords": coords})
-        if r.status_code == 200:
-            placed.append(v)
-    return placed
+
+def _act(game_id, index):
+    resp = client.post(f"/game/{game_id}/action", json={"index": index})
+    assert resp.status_code == 200
+    return resp.json()
+
+
+def _find(state, action_type):
+    return [a for a in state["legal_actions"] if a["type"] == action_type]
+
+
+def _through_setup(state):
+    """Complete the snake draft: P0 pair, AI pair+pair, P0 pair."""
+    gid = state["game_id"]
+    state = _act(gid, 0)  # P0 settlement
+    state = _act(gid, 0)  # P0 road
+    state = client.post(f"/game/{gid}/ai-turn").json()  # AI places both pairs
+    state = _act(gid, 0)  # P0 second settlement
+    state = _act(gid, 0)  # P0 second road
+    return state
 
 
 class TestGameAPI:
-    """Test game API endpoints."""
+    def test_health(self):
+        assert client.get("/health").json()["status"] == "ok"
 
-    def test_health_endpoint(self):
-        """Test health check endpoint."""
-        response = client.get("/health")
-        assert response.status_code == 200
-        assert response.json()["status"] == "ok"
+    def test_create_game_returns_state_with_legal_actions(self):
+        state = _create()
+        assert state["phase"] == "setup_settlement"
+        assert len(state["hexes"]) == 19
+        assert len(state["ports"]) == 9
+        assert len(state["legal_actions"]) == 54
+        assert state["players"][0]["name"] == "Alice"
 
-    def test_root_endpoint(self):
-        """Test root endpoint."""
-        response = client.get("/")
-        assert response.status_code == 200
+    def test_same_seed_same_board(self):
+        a, b = _create(seed=123), _create(seed=123)
+        assert a["hexes"] == b["hexes"]
+        assert a["ports"] == b["ports"]
 
-    def test_create_game_success(self):
-        """Test creating a new game."""
-        response = client.post(
-            "/game/new", json={"player_name": "Alice"}
-        )
-        assert response.status_code == 201
-        data = response.json()
-        assert "game_id" in data
-        assert data["status"] == "setup"
-        assert data["message"] == "Game created successfully"
+    def test_missing_game_404(self):
+        assert client.get("/game/nope").status_code == 404
 
-    def test_create_game_no_player_name(self):
-        """Test creating game without player name fails."""
-        response = client.post("/game/new", json={})
-        assert response.status_code == 422  # Validation error
+    def test_bad_action_index_400(self):
+        state = _create()
+        resp = client.post(f"/game/{state['game_id']}/action", json={"index": 9999})
+        assert resp.status_code == 400
 
-    def test_get_game_state_success(self):
-        """Test getting game state."""
-        # Create game
-        create_response = client.post(
-            "/game/new", json={"player_name": "Alice"}
-        )
-        game_id = create_response.json()["game_id"]
+    def test_setup_flow_reaches_main_phase(self):
+        state = _through_setup(_create(seed=7))
+        assert state["phase"] == "main"
+        assert state["current_player"] == 0
+        assert state["turn_number"] == 1
+        # both players placed 2 settlements + 2 roads
+        assert len(state["buildings"]) == 4
+        assert len(state["roads"]) == 4
 
-        # Get game state
-        response = client.get(f"/game/{game_id}")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["id"] == game_id
-        assert data["current_player_name"] == "Alice"
-        assert len(data["players"]) == 2
+    def test_roll_build_end_turn_cycle(self):
+        state = _through_setup(_create(seed=7))
+        gid = state["game_id"]
+        rolls = _find(state, "roll")
+        assert len(rolls) == 1
+        state = _act(gid, rolls[0]["index"])
+        assert state["last_roll"] is not None
+        if state["phase"] == "main":  # a 7 would detour through the robber flow
+            ends = _find(state, "end_turn")
+            state = _act(gid, ends[0]["index"])
+            assert state["current_player"] == 1
 
-    def test_get_game_state_not_found(self):
-        """Test getting nonexistent game fails."""
-        response = client.get("/game/nonexistent")
-        assert response.status_code == 404
-
-    def test_roll_dice_success(self):
-        """Test rolling dice."""
-        # Create game
-        create_response = client.post(
-            "/game/new", json={"player_name": "Alice"}
-        )
-        game_id = create_response.json()["game_id"]
-        _finish_setup(game_id)  # rolling is only legal once play begins
-
-        # Roll dice
-        response = client.post(f"/game/{game_id}/roll-dice")
-        assert response.status_code == 200
-        data = response.json()
-        assert "dice_roll" in data
-        assert 2 <= data["dice_roll"] <= 12
-        assert data["success"] is True
-
-    def test_build_settlement_success(self):
-        """Test building a settlement."""
-        # Create game
-        create_response = client.post(
-            "/game/new", json={"player_name": "Alice"}
-        )
-        game_id = create_response.json()["game_id"]
-
-        # Build settlement (using dummy coordinates)
-        response = client.post(
-            f"/game/{game_id}/build-settlement",
-            json={"vertex_coords": [(0, 0), (1, 0), (0, 1)]},
-        )
-        # May fail depending on board validation, but endpoint should work
-        assert response.status_code in [200, 400]
-
-    def test_build_settlement_invalid_game(self):
-        """Test building settlement on invalid game fails."""
-        response = client.post(
-            "/game/nonexistent/build-settlement",
-            json={"vertex_coords": [(0, 0), (1, 0), (0, 1)]},
-        )
-        assert response.status_code == 404
-
-    def test_build_road_success(self):
-        """Test building a road."""
-        # Create game
-        create_response = client.post(
-            "/game/new", json={"player_name": "Alice"}
-        )
-        game_id = create_response.json()["game_id"]
-
-        # Build road (using dummy coordinates)
-        response = client.post(
-            f"/game/{game_id}/build-road",
-            json={"hex1_coords": (0, 0), "hex2_coords": (1, 0)},
-        )
-        # May fail depending on game state, but endpoint should work
-        assert response.status_code in [200, 400]
-
-    def test_trade_success(self):
-        """Test executing a trade."""
-        # Create game
-        create_response = client.post(
-            "/game/new", json={"player_name": "Alice"}
-        )
-        game_id = create_response.json()["game_id"]
-
-        # Try to execute a trade
-        response = client.post(
-            f"/game/{game_id}/trade",
-            json={
-                "give_resources": {"wood": 1},
-                "receive_resources": {"brick": 1},
-            },
-        )
-        # Will fail because player doesn't have resources
-        assert response.status_code in [200, 400]
-
-    def test_end_turn_success(self):
-        """Test ending a turn."""
-        # Create game
-        create_response = client.post(
-            "/game/new", json={"player_name": "Alice"}
-        )
-        game_id = create_response.json()["game_id"]
-        _finish_setup(game_id)  # can't end a turn during setup
-
-        # End turn
-        response = client.post(f"/game/{game_id}/end-turn")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["next_player_id"] == 1
-        assert data["next_player_name"] == "AI Opponent"
-
-    def test_get_game_status(self):
-        """Test getting game status."""
-        # Create game
-        create_response = client.post(
-            "/game/new", json={"player_name": "Alice"}
-        )
-        game_id = create_response.json()["game_id"]
-
-        # Get status
-        response = client.get(f"/game/{game_id}/status")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["game_id"] == game_id
-        assert data["current_player"] == "Alice"
-
-    def test_full_game_flow(self):
-        """Test a full game turn sequence."""
-        # Create game
-        create_response = client.post(
-            "/game/new", json={"player_name": "Alice"}
-        )
-        game_id = create_response.json()["game_id"]
-        assert create_response.status_code == 201
-        _finish_setup(game_id)  # reach in_progress before the turn sequence
-
-        # Get initial state
-        state1 = client.get(f"/game/{game_id}").json()
-        assert state1["current_player_id"] == 0
-
-        # Roll dice
-        roll = client.post(f"/game/{game_id}/roll-dice").json()
-        assert 2 <= roll["dice_roll"] <= 12
-
-        # End turn
-        end_turn = client.post(f"/game/{game_id}/end-turn").json()
-        assert end_turn["next_player_id"] == 1
-
-        # Get updated state
-        state2 = client.get(f"/game/{game_id}").json()
-        assert state2["current_player_id"] == 1
-        assert state2["turn_number"] > state1["turn_number"]
-
-    def test_ai_turn_success(self):
-        """Test executing an AI turn."""
-        # Create game
-        create_response = client.post(
-            "/game/new", json={"player_name": "Alice"}
-        )
-        game_id = create_response.json()["game_id"]
-        _finish_setup(game_id)  # reach in_progress (human's turn)
-
-        # End human turn to switch to AI
-        client.post(f"/game/{game_id}/end-turn")
-
-        # Execute AI turn
-        response = client.post(f"/game/{game_id}/ai-turn")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["success"] is True
-        assert data["next_player_id"] == 0
-
-    def test_ai_turn_wrong_player(self):
-        """Test AI turn endpoint when it's not AI's turn fails."""
-        # Create game
-        create_response = client.post(
-            "/game/new", json={"player_name": "Alice"}
-        )
-        game_id = create_response.json()["game_id"]
-
-        # Try to execute AI turn when human's turn
-        response = client.post(f"/game/{game_id}/ai-turn")
-        assert response.status_code == 400
+    def test_ai_turn_plays_back_to_human(self):
+        state = _through_setup(_create(seed=7))
+        gid = state["game_id"]
+        state = _act(gid, _find(state, "roll")[0]["index"])
+        if state["phase"] == "main":
+            state = _act(gid, _find(state, "end_turn")[0]["index"])
+            state = client.post(f"/game/{gid}/ai-turn").json()
+            assert state["winner"] is not None or state["actor"] == 0
