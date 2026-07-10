@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from app.engine import GameState, apply_action, legal_actions, new_game
 from app.engine.policy import choose_action
 from app.models.board import Edge, HexCoord, Resource, Vertex
-from app.trainer import mcts_recommend, recommend, value_recommend
+from app.trainer import alphabeta_recommend, mcts_recommend, recommend, value_recommend
 
 router = APIRouter(prefix="/game", tags=["game"])
 
@@ -134,12 +134,13 @@ def post_action(game_id: str, request: ActionRequest):
 
 @router.get("/{game_id}/recommend")
 def recommend_moves(game_id: str, tier: str = "mc", sims: Optional[int] = None,
-                    seed: Optional[int] = None):
+                    seed: Optional[int] = None, depth: int = 2):
     """Trainer endpoint: rank the current actor's legal actions.
 
-    tier=value  instant 1-ply heuristic (returns `score`, not a probability)
-    tier=mc     flat Monte Carlo (`sims` = rollouts per action, default 25)
-    tier=mcts   UCB1 tree search (`sims` = total simulations, default 200)
+    tier=value      instant 1-ply heuristic (returns `score`, not a probability)
+    tier=mc         flat Monte Carlo (`sims` = rollouts per action, default 25)
+    tier=mcts       UCB1 tree search (`sims` = total simulations, default 200)
+    tier=alphabeta  expectiminimax (`depth`, default 2; returns `score`)
 
     Monte Carlo tiers take seconds; `index` matches the state's legal_actions
     list, so a client can act on a recommendation via POST /action directly.
@@ -170,8 +171,14 @@ def recommend_moves(game_id: str, tier: str = "mc", sims: Optional[int] = None,
              "win_probability": r.win_probability, "sims": r.sims}
             for r in mcts_recommend(state, num_simulations=sims or 200, seed=seed)
         ]
+    elif tier == "alphabeta":
+        items = [
+            {"index": index_of[r.action], "type": r.action.type.value,
+             "value": _json_value(r.action.value), "score": r.score}
+            for r in alphabeta_recommend(state, depth=depth)
+        ]
     else:
-        raise HTTPException(status_code=400, detail="tier must be value, mc, or mcts")
+        raise HTTPException(status_code=400, detail="tier must be value, mc, mcts, or alphabeta")
 
     return {"game_id": game_id, "tier": tier, "advising": state.actor(),
             "recommendations": items}

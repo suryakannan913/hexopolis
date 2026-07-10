@@ -5,6 +5,7 @@ Usage (from backend/):
     python3 recommend_cli.py --seed 42 --advance 30            # flat Monte Carlo
     python3 recommend_cli.py --seed 42 --advance 30 --mcts     # UCB1 tree search
     python3 recommend_cli.py --seed 42 --advance 30 --value    # instant value fn
+    python3 recommend_cli.py --seed 42 --advance 30 --alphabeta  # expectiminimax
 
 --advance N plays N plies of heuristic self-play from a fresh seeded game to
 reach a mid-game position; forced single-option states (e.g. the mandatory
@@ -21,6 +22,7 @@ from app.models.board import Resource
 from app.trainer import (
     CONTENDER_WEIGHTS,
     DEFAULT_WEIGHTS,
+    alphabeta_recommend,
     mcts_recommend,
     recommend,
     value_recommend,
@@ -72,8 +74,11 @@ def main():
     ap.add_argument("--mcts-sims", type=int, default=200, help="MCTS: total simulations")
     ap.add_argument("--value", action="store_true",
                     help="instant 1-ply value-function ranking (scores, not win probabilities)")
+    ap.add_argument("--alphabeta", action="store_true",
+                    help="expectiminimax search (scores, not win probabilities)")
+    ap.add_argument("--depth", type=int, default=2, help="--alphabeta: search depth")
     ap.add_argument("--weights", choices=["default", "contender"], default="default",
-                    help="--value tier: which published weight set to use")
+                    help="--value/--alphabeta: which published weight set to use")
     args = ap.parse_args()
 
     state = build_position(args.seed, args.advance)
@@ -86,10 +91,15 @@ def main():
     print(f"VP: you {state.total_vp(actor)} vs opponent {state.total_vp(1 - actor)} | "
           f"hand: " + " ".join(f"{r.value[:2]}:{me.resources[r]}" for r in Resource))
 
-    if args.value:
+    if args.value or args.alphabeta:
         weights = CONTENDER_WEIGHTS if args.weights == "contender" else DEFAULT_WEIGHTS
-        print(f"\nValue function ({args.weights} weights): 1-ply over {n_actions} actions...")
-        scored = value_recommend(state, weights=weights, seed=args.seed)
+        if args.alphabeta:
+            print(f"\nAlpha-beta (depth {args.depth}, {args.weights} weights) "
+                  f"over {n_actions} actions...")
+            scored = alphabeta_recommend(state, depth=args.depth, weights=weights)
+        else:
+            print(f"\nValue function ({args.weights} weights): 1-ply over {n_actions} actions...")
+            scored = value_recommend(state, weights=weights, seed=args.seed)
         lo, hi = scored[-1].score, scored[0].score
         span = (hi - lo) or 1.0
         print(f"\n{'#':>2}  {'score':>12}  action")

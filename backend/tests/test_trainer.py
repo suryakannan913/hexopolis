@@ -8,8 +8,9 @@ from app.engine import CITY, SETTLEMENT, Phase, apply_action, legal_actions, new
 from app.engine.actions import Action, ActionType
 from app.engine.state import PlayerState
 from app.models.board import Resource
-from app.trainer import mcts_recommend, recommend, value_recommend
+from app.trainer import alphabeta_recommend, mcts_recommend, recommend, value_recommend
 from app.trainer.rollout_policy import weighted_random_policy
+from app.trainer.spectrum import expand
 from app.trainer.value_function import (
     effective_production,
     hand_synergy,
@@ -166,6 +167,74 @@ class TestValueFunction:
         assert before == after
 
 
+class TestSpectrum:
+    def test_roll_expands_to_eleven_weighted_outcomes(self):
+        state = _main_phase_state()
+        roll = next(a for a in legal_actions(state) if a.type == ActionType.ROLL)
+        outcomes = expand(state, roll)
+        assert len(outcomes) == 11
+        assert sum(p for _, p in outcomes) == pytest.approx(1.0)
+        sums = sorted(sum(child.last_roll) for child, _ in outcomes)
+        assert sums == list(range(2, 13))
+        for child, p in outcomes:
+            assert p == number_probability(sum(child.last_roll))
+
+    def test_deterministic_action_is_single_certain_outcome(self):
+        state = _winning_city_state()
+        city = next(a for a in legal_actions(state) if a.type == ActionType.BUILD_CITY)
+        outcomes = expand(state, city)
+        assert len(outcomes) == 1 and outcomes[0][1] == 1.0
+        assert outcomes[0][0].is_terminal()          # the upgrade wins at 15 VP
+        assert not state.is_terminal()               # parent untouched
+
+    def test_buy_dev_card_weighted_by_deck_composition(self):
+        state = _winning_city_state()
+        p0 = state.players[0]
+        p0.resources[Resource.ORE] += 1
+        p0.resources[Resource.SHEEP] += 1
+        p0.resources[Resource.WHEAT] += 1
+        buy = next(a for a in legal_actions(state) if a.type == ActionType.BUY_DEV_CARD)
+        outcomes = expand(state, buy)
+        deck = state.dev_deck
+        assert len(outcomes) == len(set(deck))
+        assert sum(p for _, p in outcomes) == pytest.approx(1.0)
+        for child, p in outcomes:
+            drawn = next(c for c in child.players[0].dev_bought_this_turn
+                         if child.players[0].dev_bought_this_turn[c]
+                         > p0.dev_bought_this_turn[c])
+            assert p == pytest.approx(deck.count(drawn) / len(deck))
+
+
+class TestAlphaBeta:
+    def test_immediate_win_anchor(self):
+        state = _winning_city_state()
+        scored = alphabeta_recommend(state, depth=2)
+        assert scored[0].action.type == ActionType.BUILD_CITY
+        assert scored[0].score == pytest.approx(1e18)   # explicit terminal win value
+        assert {s.action for s in scored} == set(legal_actions(state))
+
+    def test_is_deterministic(self):
+        state = _main_phase_state()
+        assert alphabeta_recommend(state, depth=1) == alphabeta_recommend(state, depth=1)
+
+    def test_does_not_mutate_input_state(self):
+        state = _winning_city_state()
+        before = (state.phase, dict(state.buildings), state.rng.getstate())
+        alphabeta_recommend(state, depth=1)
+        after = (state.phase, dict(state.buildings), state.rng.getstate())
+        assert before == after
+
+    def test_rejects_bad_depth_and_terminal(self):
+        state = _main_phase_state()
+        with pytest.raises(ValueError):
+            alphabeta_recommend(state, depth=0)
+        won = _winning_city_state()
+        city = next(a for a in legal_actions(won) if a.type == ActionType.BUILD_CITY)
+        apply_action(won, city)
+        with pytest.raises(ValueError):
+            alphabeta_recommend(won)
+
+
 class TestRecommendAPI:
     def _client_and_game(self):
         from main import app
@@ -200,6 +269,13 @@ class TestRecommendAPI:
         for x in r.json()["recommendations"]:
             assert 0.0 <= x["win_probability"] <= 1.0
             assert x["sims"] == 2
+
+    def test_alphabeta_tier(self):
+        client, gid = self._client_and_game()
+        r = client.get(f"/game/{gid}/recommend", params={"tier": "alphabeta", "depth": 1})
+        assert r.status_code == 200
+        scores = [x["score"] for x in r.json()["recommendations"]]
+        assert scores and scores == sorted(scores, reverse=True)
 
     def test_unknown_tier_rejected(self):
         client, gid = self._client_and_game()
