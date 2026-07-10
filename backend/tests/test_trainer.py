@@ -1,13 +1,20 @@
-"""Trainer tests: flat Monte Carlo recommender, MCTS, and the rollout policy."""
+"""Trainer tests: flat MC recommender, MCTS, value function, rollout policy, API."""
 import random
 
 import pytest
+from fastapi.testclient import TestClient
 
 from app.engine import CITY, SETTLEMENT, Phase, apply_action, legal_actions, new_game
 from app.engine.actions import Action, ActionType
+from app.engine.state import PlayerState
 from app.models.board import Resource
-from app.trainer import mcts_recommend, recommend
+from app.trainer import mcts_recommend, recommend, value_recommend
 from app.trainer.rollout_policy import weighted_random_policy
+from app.trainer.value_function import (
+    effective_production,
+    hand_synergy,
+    number_probability,
+)
 
 
 def _main_phase_state(seed=7):
@@ -110,6 +117,93 @@ class TestMCTS:
         mcts_recommend(state, num_simulations=20, seed=0)
         after = (state.phase, dict(state.buildings), state.rng.getstate())
         assert before == after
+
+
+class TestValueFunction:
+    def test_number_probability_is_exact_2d6(self):
+        assert number_probability(2) == number_probability(12) == 1 / 36
+        assert number_probability(7) == 6 / 36
+        assert sum(number_probability(n) for n in range(2, 13)) == pytest.approx(1.0)
+
+    def test_robber_suppresses_production(self):
+        state = _main_phase_state()
+        base = sum(effective_production(state, 0).values())
+        # Park the robber on a producing hex adjacent to one of P0's buildings.
+        target = next(
+            h.coord
+            for v, (o, _) in state.buildings.items() if o == 0
+            for h in state.board.get_hexes_for_vertex(v)
+            if h.resource is not None and h.dice_number is not None
+        )
+        state.robber = target
+        assert sum(effective_production(state, 0).values()) < base
+
+    def test_hand_synergy_bounds(self):
+        empty = PlayerState(id=0, name="x")
+        assert hand_synergy(empty) == 0.0
+        full = PlayerState(id=0, name="y")
+        for r, n in [(Resource.WHEAT, 2), (Resource.ORE, 3), (Resource.WOOD, 1),
+                     (Resource.BRICK, 1), (Resource.SHEEP, 1)]:
+            full.resources[r] = n
+        assert hand_synergy(full) == 1.0
+
+    def test_immediate_win_anchor(self):
+        """The near-lexicographic VP term must put a winning city upgrade first."""
+        state = _winning_city_state()
+        scored = value_recommend(state, seed=5)
+        assert scored[0].action.type == ActionType.BUILD_CITY
+        assert {s.action for s in scored} == set(legal_actions(state))
+
+    def test_seeded_value_recommend_is_reproducible(self):
+        state = _main_phase_state()
+        assert value_recommend(state, seed=11) == value_recommend(state, seed=11)
+
+    def test_does_not_mutate_input_state(self):
+        state = _main_phase_state()
+        before = (state.phase, dict(state.buildings), state.rng.getstate())
+        value_recommend(state, seed=0)
+        after = (state.phase, dict(state.buildings), state.rng.getstate())
+        assert before == after
+
+
+class TestRecommendAPI:
+    def _client_and_game(self):
+        from main import app
+        client = TestClient(app)
+        game_id = client.post("/game/new", json={"player_name": "T", "seed": 7}).json()["game_id"]
+        # Walk the setup snake draft (human + AI) to reach the main phase.
+        for _ in range(20):
+            s = client.get(f"/game/{game_id}").json()
+            if s["phase"] not in ("setup_settlement", "setup_road"):
+                break
+            if s["actor"] == 0:
+                client.post(f"/game/{game_id}/action", json={"index": 0})
+            else:
+                client.post(f"/game/{game_id}/ai-turn")
+        return client, game_id
+
+    def test_value_tier(self):
+        client, gid = self._client_and_game()
+        r = client.get(f"/game/{gid}/recommend", params={"tier": "value", "seed": 1})
+        assert r.status_code == 200
+        body = r.json()
+        n_legal = len(client.get(f"/game/{gid}").json()["legal_actions"])
+        assert len(body["recommendations"]) == n_legal
+        scores = [x["score"] for x in body["recommendations"]]
+        assert scores == sorted(scores, reverse=True)
+        assert all(0 <= x["index"] < n_legal for x in body["recommendations"])
+
+    def test_mc_tier_returns_probabilities(self):
+        client, gid = self._client_and_game()
+        r = client.get(f"/game/{gid}/recommend", params={"tier": "mc", "sims": 2, "seed": 1})
+        assert r.status_code == 200
+        for x in r.json()["recommendations"]:
+            assert 0.0 <= x["win_probability"] <= 1.0
+            assert x["sims"] == 2
+
+    def test_unknown_tier_rejected(self):
+        client, gid = self._client_and_game()
+        assert client.get(f"/game/{gid}/recommend", params={"tier": "bogus"}).status_code == 400
 
 
 class TestRolloutPolicy:

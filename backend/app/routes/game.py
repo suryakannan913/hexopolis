@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from app.engine import GameState, apply_action, legal_actions, new_game
 from app.engine.policy import choose_action
 from app.models.board import Edge, HexCoord, Resource, Vertex
+from app.trainer import mcts_recommend, recommend, value_recommend
 
 router = APIRouter(prefix="/game", tags=["game"])
 
@@ -129,6 +130,51 @@ def post_action(game_id: str, request: ActionRequest):
         raise HTTPException(status_code=400, detail=f"action index out of range (0..{len(acts)-1})")
     apply_action(state, acts[request.index], validate=False)
     return _serialize(game_id, state)
+
+
+@router.get("/{game_id}/recommend")
+def recommend_moves(game_id: str, tier: str = "mc", sims: Optional[int] = None,
+                    seed: Optional[int] = None):
+    """Trainer endpoint: rank the current actor's legal actions.
+
+    tier=value  instant 1-ply heuristic (returns `score`, not a probability)
+    tier=mc     flat Monte Carlo (`sims` = rollouts per action, default 25)
+    tier=mcts   UCB1 tree search (`sims` = total simulations, default 200)
+
+    Monte Carlo tiers take seconds; `index` matches the state's legal_actions
+    list, so a client can act on a recommendation via POST /action directly.
+    The game state is not mutated.
+    """
+    state = _get(game_id)
+    if state.is_terminal():
+        raise HTTPException(status_code=400, detail="Game is over")
+    index_of = {a: i for i, a in enumerate(legal_actions(state))}
+
+    if tier == "value":
+        items = [
+            {"index": index_of[r.action], "type": r.action.type.value,
+             "value": _json_value(r.action.value), "score": r.score}
+            for r in value_recommend(state, seed=seed)
+        ]
+    elif tier == "mc":
+        items = [
+            {"index": index_of[r.action], "type": r.action.type.value,
+             "value": _json_value(r.action.value),
+             "win_probability": r.win_probability, "sims": r.sims}
+            for r in recommend(state, sims_per_action=sims or 25, seed=seed)
+        ]
+    elif tier == "mcts":
+        items = [
+            {"index": index_of[r.action], "type": r.action.type.value,
+             "value": _json_value(r.action.value),
+             "win_probability": r.win_probability, "sims": r.sims}
+            for r in mcts_recommend(state, num_simulations=sims or 200, seed=seed)
+        ]
+    else:
+        raise HTTPException(status_code=400, detail="tier must be value, mc, or mcts")
+
+    return {"game_id": game_id, "tier": tier, "advising": state.actor(),
+            "recommendations": items}
 
 
 @router.post("/{game_id}/ai-turn")

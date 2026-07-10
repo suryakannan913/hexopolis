@@ -4,6 +4,7 @@ probabilities.
 Usage (from backend/):
     python3 recommend_cli.py --seed 42 --advance 30            # flat Monte Carlo
     python3 recommend_cli.py --seed 42 --advance 30 --mcts     # UCB1 tree search
+    python3 recommend_cli.py --seed 42 --advance 30 --value    # instant value fn
 
 --advance N plays N plies of heuristic self-play from a fresh seeded game to
 reach a mid-game position; forced single-option states (e.g. the mandatory
@@ -17,7 +18,13 @@ from app.engine import Phase, apply_action, legal_actions, new_game
 from app.engine.actions import Action, ActionType
 from app.engine.policy import choose_action
 from app.models.board import Resource
-from app.trainer import mcts_recommend, recommend
+from app.trainer import (
+    CONTENDER_WEIGHTS,
+    DEFAULT_WEIGHTS,
+    mcts_recommend,
+    recommend,
+    value_recommend,
+)
 
 
 def describe(action: Action) -> str:
@@ -63,6 +70,10 @@ def main():
     ap.add_argument("--sims", type=int, default=25, help="flat MC: simulations per action")
     ap.add_argument("--mcts", action="store_true", help="use UCB1 MCTS instead of flat MC")
     ap.add_argument("--mcts-sims", type=int, default=200, help="MCTS: total simulations")
+    ap.add_argument("--value", action="store_true",
+                    help="instant 1-ply value-function ranking (scores, not win probabilities)")
+    ap.add_argument("--weights", choices=["default", "contender"], default="default",
+                    help="--value tier: which published weight set to use")
     args = ap.parse_args()
 
     state = build_position(args.seed, args.advance)
@@ -74,6 +85,20 @@ def main():
           f"turn={state.turn_number} | advising P{actor} ({me.name})")
     print(f"VP: you {state.total_vp(actor)} vs opponent {state.total_vp(1 - actor)} | "
           f"hand: " + " ".join(f"{r.value[:2]}:{me.resources[r]}" for r in Resource))
+
+    if args.value:
+        weights = CONTENDER_WEIGHTS if args.weights == "contender" else DEFAULT_WEIGHTS
+        print(f"\nValue function ({args.weights} weights): 1-ply over {n_actions} actions...")
+        scored = value_recommend(state, weights=weights, seed=args.seed)
+        lo, hi = scored[-1].score, scored[0].score
+        span = (hi - lo) or 1.0
+        print(f"\n{'#':>2}  {'score':>12}  action")
+        for i, r in enumerate(scored, 1):
+            bar = "#" * round(20 * (r.score - lo) / span)
+            print(f"{i:>2}  {r.score:12.4g}  {describe(r.action):<44} {bar}")
+        print(f"\n>>> recommended: {describe(scored[0].action)}  "
+              f"(heuristic score, not a win probability)")
+        return
 
     if args.mcts:
         print(f"\nMCTS: {args.mcts_sims} simulations over {n_actions} actions...")
