@@ -1,7 +1,7 @@
 import type { Pair } from '@/lib/api';
-import { getResourceIcon } from '@/lib/hexUtils';
+import { resourceIcon } from '@/lib/theme';
 
-const ICON = (r: string) => getResourceIcon(r);
+const ICON = (r: string) => resourceIcon(r);
 
 function vertexLabel(pairs: Pair[]): string {
   return pairs.map(([q, r]) => `(${q},${r})`).join('·');

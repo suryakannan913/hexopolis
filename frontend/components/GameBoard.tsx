@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GameDto, LegalAction, Pair } from '@/lib/api';
 import {
   HEX_RADIUS,
@@ -9,20 +9,17 @@ import {
   drawRoad,
   drawSettlement,
   fillHexShape,
-  getResourceColor,
-  getResourceIcon,
   hexToPixel,
   type PixelCoord,
 } from '@/lib/hexUtils';
-
-export const PLAYER_COLORS = ['#5aa0e0', '#e05a5a']; // P0 you, P1 AI
+import { PLAYER_COLORS, resourceIcon, terrainColor } from '@/lib/theme';
 
 export type BoardMode = 'settlement' | 'road' | 'city' | 'robber' | null;
 
 interface GameBoardProps {
   game: GameDto;
   mode: BoardMode;
-  hint: LegalAction | null;   // top recommendation, highlighted in gold
+  hint: LegalAction | null;   // top recommendation, ringed in gold
   disabled: boolean;
   onPick: (actionIndex: number) => void;
 }
@@ -66,6 +63,23 @@ function actionAnchor(a: LegalAction, ox: number, oy: number): PixelCoord | null
   return null;
 }
 
+/** All 54 vertex triples of the board, keyed like the server serializes them. */
+function allVertices(game: GameDto): Pair[][] {
+  const seen = new Set<string>();
+  const out: Pair[][] = [];
+  for (const h of game.hexes) {
+    for (let i = 0; i < 6; i++) {
+      const n1: Pair = [h.q + DIRS[i][0], h.r + DIRS[i][1]];
+      const n2: Pair = [h.q + DIRS[(i + 1) % 6][0], h.r + DIRS[(i + 1) % 6][1]];
+      const triple = ([[h.q, h.r], n1, n2] as Pair[])
+        .slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      const key = triple.map((p) => p.join(',')).join('|');
+      if (!seen.has(key)) { seen.add(key); out.push(triple); }
+    }
+  }
+  return out;
+}
+
 function drawCity(ctx: CanvasRenderingContext2D, c: PixelCoord, color: string) {
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,0.35)';
@@ -92,6 +106,7 @@ function drawCity(ctx: CanvasRenderingContext2D, c: PixelCoord, color: string) {
 export default function GameBoard({ game, mode, hint, disabled, onPick }: GameBoardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState<Target | null>(null);
+  const [, forceRedraw] = useState(0);
 
   const targets: Target[] = [];
   const canvas = canvasRef.current;
@@ -105,7 +120,7 @@ export default function GameBoard({ game, mode, hint, disabled, onPick }: GameBo
     }
   }
 
-  const nearest = (e: React.MouseEvent<HTMLCanvasElement>): Target | null => {
+  const nearest = useCallback((e: React.MouseEvent<HTMLCanvasElement>): Target | null => {
     const el = canvasRef.current;
     if (!el) return null;
     const rect = el.getBoundingClientRect();
@@ -118,7 +133,15 @@ export default function GameBoard({ game, mode, hint, disabled, onPick }: GameBo
       if (d < bestD) { best = t; bestD = d; }
     }
     return best;
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game, mode, disabled]);
+
+  // Keep the canvas matched to its container.
+  useEffect(() => {
+    const onResize = () => forceRedraw((n) => n + 1);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     const el = canvasRef.current;
@@ -143,11 +166,11 @@ export default function GameBoard({ game, mode, hint, disabled, onPick }: GameBo
     // Hexes: terrain, icon, number token, robber
     game.hexes.forEach((h, i) => {
       const c = centers[i];
-      drawHex(ctx, c, getResourceColor(h.resource), 'rgba(15,23,42,0.45)', 2);
+      drawHex(ctx, c, terrainColor(h.resource), 'rgba(15,23,42,0.45)', 2);
       ctx.font = '19px Arial';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(getResourceIcon(h.resource), c.x, c.y - 16);
+      ctx.fillText(resourceIcon(h.resource), c.x, c.y - 16);
       if (h.number !== null) drawNumberChip(ctx, { x: c.x, y: c.y + 13 }, h.number, 15);
       if (h.q === game.robber[0] && h.r === game.robber[1]) {
         ctx.fillStyle = 'rgba(30,41,59,0.92)';
@@ -160,22 +183,45 @@ export default function GameBoard({ game, mode, hint, disabled, onPick }: GameBo
       }
     });
 
-    // Ports: badge just outside each port vertex
+    // Open building spots: faint dots on every empty vertex, always visible
+    const occupied = new Set(game.buildings.map((b) =>
+      b.vertex.map((p) => p.join(',')).join('|')));
+    for (const triple of allVertices(game)) {
+      const key = triple.map((p) => p.join(',')).join('|');
+      if (occupied.has(key)) continue;
+      const v = centroid(triple, ox, oy);
+      ctx.fillStyle = 'rgba(248,250,252,0.18)';
+      ctx.beginPath();
+      ctx.arc(v.x, v.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Ports: boat offshore + ratio badge with the resource icon
     for (const port of game.ports) {
       const v = centroid(port.vertex, ox, oy);
-      const bx = v.x + (v.x - ox) * 0.14;
-      const by = v.y + (v.y - oy) * 0.14;
-      const label = port.type === '3:1' ? '3:1' : `2:1${getResourceIcon(port.type)}`;
+      const len = Math.hypot(v.x - ox, v.y - oy) || 1;
+      const bx = v.x + ((v.x - ox) / len) * 30;
+      const by = v.y + ((v.y - oy) / len) * 30;
+      ctx.font = '16px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('⛵', bx, by - 8);
+      const label = port.type === '3:1' ? '3:1 ?' : `2:1 ${resourceIcon(port.type)}`;
       ctx.font = 'bold 10px Arial';
       const w = ctx.measureText(label).width + 8;
       ctx.fillStyle = 'rgba(248,250,252,0.92)';
       ctx.beginPath();
-      ctx.roundRect(bx - w / 2, by - 8, w, 16, 6);
+      ctx.roundRect(bx - w / 2, by + 2, w, 14, 5);
       ctx.fill();
       ctx.fillStyle = '#0f172a';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, bx, by + 1);
+      ctx.fillText(label, bx, by + 9);
+      // thin tie back to the port vertex
+      ctx.strokeStyle = 'rgba(248,250,252,0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(v.x, v.y);
+      ctx.lineTo(bx, by - 2);
+      ctx.stroke();
     }
 
     // Roads along their true edges, then buildings on top
@@ -225,7 +271,7 @@ export default function GameBoard({ game, mode, hint, disabled, onPick }: GameBo
       ctx.stroke();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [game, mode, hover, hint, disabled]);
+  });
 
   return (
     <canvas

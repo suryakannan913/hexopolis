@@ -6,14 +6,18 @@ import Link from 'next/link';
 import { useGame } from '@/hooks/useGame';
 import { isBoardAction } from '@/lib/describe';
 import GameBoard, { type BoardMode } from '@/components/GameBoard';
-import SidePanel from '@/components/SidePanel';
-import ActionBar from '@/components/ActionBar';
+import PromptBar from '@/components/PromptBar';
+import LogPanel from '@/components/LogPanel';
+import BankRow from '@/components/BankRow';
+import HandCards from '@/components/HandCards';
+import Toolbar from '@/components/Toolbar';
+import StatusCard from '@/components/StatusCard';
 import HintPanel from '@/components/HintPanel';
 
 export default function GamePage() {
   const params = useParams();
   const gameId = (params?.id as string) || '';
-  const { game, busy, analyzing, hints, error, act, analyze, autoHint, setAutoHint } =
+  const { game, busy, analyzing, hints, error, act, analyze, autoHint, setAutoHint, log } =
     useGame(gameId);
   const [mode, setMode] = useState<BoardMode>(null);
 
@@ -30,8 +34,8 @@ export default function GamePage() {
 
   if (!game) {
     return (
-      <main className="flex min-h-screen items-center justify-center">
-        <div className="text-xl text-slate-300">{error ? `Error: ${error}` : 'Loading game…'}</div>
+      <main className="flex min-h-screen items-center justify-center bg-slate-900 text-slate-300">
+        {error ? `Error: ${error}` : 'Loading game…'}
       </main>
     );
   }
@@ -43,16 +47,11 @@ export default function GamePage() {
 
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-slate-900 text-white">
-      <header className="flex items-center justify-between border-b border-slate-700 bg-slate-800 px-4 py-2">
-        <h1 className="text-xl font-bold">Hexopolis <span className="text-sm font-normal text-slate-400">1v1 trainer</span></h1>
-        <div className="text-sm text-slate-400">
-          seed {game.seed} · turn {game.turn_number} · {game.phase}
-          {error && <span className="ml-3 text-rose-400">⚠ {error}</span>}
-        </div>
-      </header>
+      <PromptBar game={game} error={error} />
 
-      <div className="flex flex-1 gap-3 overflow-hidden p-3">
-        <div className="relative flex-1 overflow-hidden rounded-lg border border-slate-700 bg-slate-800">
+      {/* Center: board anchor + fixed-width right rail (log, bank, trainer) */}
+      <div className="flex min-h-0 flex-1 gap-2 p-2">
+        <div className="relative min-w-0 flex-1 overflow-hidden rounded-lg border border-slate-700">
           <GameBoard
             game={game}
             mode={mode}
@@ -77,9 +76,9 @@ export default function GamePage() {
           )}
         </div>
 
-        <div className="flex w-96 flex-col gap-3 overflow-y-auto">
-          <SidePanel game={game} />
-          <ActionBar game={game} mode={mode} setMode={setMode} busy={busy} onAct={act} />
+        <aside className="flex w-80 shrink-0 flex-col gap-2 overflow-hidden">
+          <LogPanel log={log} />
+          <BankRow game={game} />
           <HintPanel
             game={game}
             hints={hints}
@@ -90,8 +89,15 @@ export default function GamePage() {
             onAct={act}
             busy={busy}
           />
-        </div>
+        </aside>
       </div>
+
+      {/* Bottom: hand | toolbar | player status */}
+      <footer className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-end gap-3 px-3 pb-2 pt-1">
+        <HandCards game={game} />
+        <Toolbar game={game} mode={mode} setMode={setMode} busy={busy} onAct={act} />
+        <StatusCard game={game} />
+      </footer>
     </main>
   );
 }
