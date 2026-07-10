@@ -1,104 +1,95 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { useGameStore } from '@/store/gameStore';
-import { useGameState } from '@/hooks/useGameState';
-import GameBoard from '@/components/GameBoard';
-import ResourcePanel from '@/components/ResourcePanel';
-import ActionPanel from '@/components/ActionPanel';
-
-type BuildMode = 'none' | 'settlement' | 'road';
+import Link from 'next/link';
+import { useGame } from '@/hooks/useGame';
+import { isBoardAction } from '@/lib/describe';
+import GameBoard, { type BoardMode } from '@/components/GameBoard';
+import SidePanel from '@/components/SidePanel';
+import ActionBar from '@/components/ActionBar';
+import HintPanel from '@/components/HintPanel';
 
 export default function GamePage() {
   const params = useParams();
   const gameId = (params?.id as string) || '';
-  const gameState = useGameStore();
-  const { fetchGameState } = useGameState(gameId);
-  const [buildMode, setBuildMode] = useState<BuildMode>('none');
+  const { game, busy, analyzing, hints, error, act, analyze, autoHint, setAutoHint } =
+    useGame(gameId);
+  const [mode, setMode] = useState<BoardMode>(null);
 
-  const isSetup = gameState.status === 'setup';
-  const humanSettlements = gameState.settlements.filter((s) => s.ownerId === 0).length;
-
-  // During the opening phase, the only action is placing settlements.
-  // Once it ends, clear the mode so normal play starts from a clean slate.
+  // Phases with exactly one kind of board interaction force the mode.
+  const phase = game?.phase;
+  const actor = game?.actor;
   useEffect(() => {
-    setBuildMode(isSetup ? 'settlement' : 'none');
-  }, [isSetup]);
+    if (actor !== 0) return setMode(null);
+    if (phase === 'setup_settlement') setMode('settlement');
+    else if (phase === 'setup_road') setMode('road');
+    else if (phase === 'move_robber') setMode('robber');
+    else setMode(null);
+  }, [phase, actor, game?.turn_number]);
 
-  if (gameState.loading && !gameState.gameId) {
+  if (!game) {
     return (
-      <main className="flex items-center justify-center min-h-screen">
-        <div className="text-2xl">Loading game...</div>
+      <main className="flex min-h-screen items-center justify-center">
+        <div className="text-xl text-slate-300">{error ? `Error: ${error}` : 'Loading game…'}</div>
       </main>
     );
   }
 
-  if (gameState.error) {
-    return (
-      <main className="flex items-center justify-center min-h-screen">
-        <div className="text-2xl text-red-500">Error: {gameState.error}</div>
-      </main>
-    );
-  }
-
-  const currentPlayer = gameState.players.find((p) => p.id === gameState.currentPlayerId);
-  const isHumanTurn = currentPlayer?.playerType === 'human';
+  const top = hints?.recommendations[0];
+  const boardHint = top && isBoardAction(top.type)
+    ? { index: top.index, player: 0, type: top.type, value: top.value }
+    : null;
 
   return (
-    <main className="w-full h-screen bg-slate-900 flex flex-col overflow-hidden">
-      {/* Header */}
-      <header className="bg-slate-800 border-b border-slate-700 p-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Hexopolis</h1>
-          <div className="text-sm text-slate-400">
-            Turn {gameState.turnNumber} • {gameState.status === 'won' ? '🎉 Game Won!' : `${currentPlayer?.name}'s Turn`}
-          </div>
+    <main className="flex h-screen flex-col overflow-hidden bg-slate-900 text-white">
+      <header className="flex items-center justify-between border-b border-slate-700 bg-slate-800 px-4 py-2">
+        <h1 className="text-xl font-bold">Hexopolis <span className="text-sm font-normal text-slate-400">1v1 trainer</span></h1>
+        <div className="text-sm text-slate-400">
+          seed {game.seed} · turn {game.turn_number} · {game.phase}
+          {error && <span className="ml-3 text-rose-400">⚠ {error}</span>}
         </div>
       </header>
 
-      {/* Setup banner */}
-      {isSetup && (
-        <div className="bg-amber-900/40 border-b border-amber-700/50 px-4 py-2 text-amber-100 text-sm text-center">
-          🏘️ Opening placement — click the board to place your starting settlements ({humanSettlements}/2). They grant your starting resources.
-        </div>
-      )}
-
-      {/* Game Container */}
-      <div className="flex flex-1 overflow-hidden gap-4 p-4">
-        {/* Left: Game Board */}
-        <div className="flex-1 bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
-          <GameBoard gameId={gameId} buildMode={buildMode} onBuildModeChange={setBuildMode} onActionComplete={fetchGameState} />
-        </div>
-
-        {/* Right Sidebar */}
-        <div className="w-80 flex flex-col gap-4">
-          {/* Resource Panel */}
-          <ResourcePanel />
-
-          {/* Action Panel */}
-          <ActionPanel gameId={gameId} isHumanTurn={isHumanTurn} onActionComplete={fetchGameState} onBuildModeChange={setBuildMode} />
-
-          {/* Players Info */}
-          <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 flex-1 overflow-y-auto">
-            <h3 className="font-semibold mb-3">Players</h3>
-            <div className="space-y-2">
-              {gameState.players.map((player) => (
-                <div
-                  key={player.id}
-                  className={`p-2 rounded ${player.id === gameState.currentPlayerId ? 'bg-blue-900/50 border-l-2 border-blue-500' : 'bg-slate-700'}`}
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="font-medium">{player.name}</span>
-                    <span className="text-lg font-bold text-yellow-400">{player.points} pts</span>
-                  </div>
-                  <div className="text-sm text-slate-400">
-                    {player.settlementsCount} settlements • {player.roadsCount} roads
-                  </div>
+      <div className="flex flex-1 gap-3 overflow-hidden p-3">
+        <div className="relative flex-1 overflow-hidden rounded-lg border border-slate-700 bg-slate-800">
+          <GameBoard
+            game={game}
+            mode={mode}
+            hint={boardHint}
+            disabled={busy || game.actor !== 0 || game.winner !== null}
+            onPick={act}
+          />
+          {game.winner !== null && (
+            <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70">
+              <div className="rounded-xl border border-amber-500/50 bg-slate-800 p-8 text-center">
+                <div className="text-3xl font-bold">
+                  {game.winner === 0 ? '🎉 You win!' : '🤖 The AI wins.'}
                 </div>
-              ))}
+                <div className="mt-2 text-slate-300">
+                  {game.players[game.winner].total_vp} VP on turn {game.turn_number}
+                </div>
+                <Link href="/" className="mt-4 inline-block rounded bg-blue-600 px-4 py-2 font-medium hover:bg-blue-500">
+                  New game
+                </Link>
+              </div>
             </div>
-          </div>
+          )}
+        </div>
+
+        <div className="flex w-96 flex-col gap-3 overflow-y-auto">
+          <SidePanel game={game} />
+          <ActionBar game={game} mode={mode} setMode={setMode} busy={busy} onAct={act} />
+          <HintPanel
+            game={game}
+            hints={hints}
+            analyzing={analyzing}
+            autoHint={autoHint}
+            setAutoHint={setAutoHint}
+            onAnalyze={analyze}
+            onAct={act}
+            busy={busy}
+          />
         </div>
       </div>
     </main>

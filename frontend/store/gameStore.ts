@@ -1,83 +1,33 @@
 import { create } from 'zustand';
+import type { GameDto, HintsDto } from '@/lib/api';
 
-export interface GameState {
-  gameId: string | null;
-  status: 'setup' | 'in_progress' | 'won' | null;
-  currentPlayerId: number;
-  currentPlayerName: string;
-  turnNumber: number;
-  lastDiceRoll: number | null;
-  players: Array<{
-    id: number;
-    name: string;
-    playerType: 'human' | 'ai';
-    color: string;
-    points: number;
-    resources: {
-      wood: number;
-      wheat: number;
-      ore: number;
-      brick: number;
-      sheep: number;
-    };
-    settlementsCount: number;
-    roadsCount: number;
-  }>;
-  settlementsCount: number;
-  roadsCount: number;
-  board: Array<{
-    q: number;
-    r: number;
-    resource: string | null;
-    diceNumber: number | null;
-  }>;
-  settlements: Array<{
-    ownerId: number;
-    color: string;
-    vertexCoords: [number, number][];
-  }>;
-  roads: Array<{
-    ownerId: number;
-    color: string;
-    hex1: [number, number];
-    hex2: [number, number];
-  }>;
-  setupComplete: boolean;
-  loading: boolean;
+/** UI state: the latest server DTO plus transient flags. No rules live here. */
+interface GameStore {
+  game: GameDto | null;
+  busy: boolean;           // an action/AI turn is in flight
+  analyzing: boolean;      // a hint request is in flight
+  hints: HintsDto | null;  // last recommendations for the current state
   error: string | null;
-}
 
-export interface GameActions {
-  setGameId: (gameId: string) => void;
-  setGameState: (state: Partial<GameState>) => void;
-  setLoading: (loading: boolean) => void;
+  setGame: (game: GameDto) => void;
+  setBusy: (busy: boolean) => void;
+  setAnalyzing: (analyzing: boolean) => void;
+  setHints: (hints: HintsDto | null) => void;
   setError: (error: string | null) => void;
   reset: () => void;
 }
 
-const initialState: Omit<GameState, keyof GameActions> = {
-  gameId: null,
-  status: null,
-  currentPlayerId: 0,
-  currentPlayerName: '',
-  turnNumber: 0,
-  lastDiceRoll: null,
-  players: [],
-  settlementsCount: 0,
-  roadsCount: 0,
-  board: [],
-  settlements: [],
-  roads: [],
-  setupComplete: false,
-  loading: false,
+export const useGameStore = create<GameStore>((set) => ({
+  game: null,
+  busy: false,
+  analyzing: false,
+  hints: null,
   error: null,
-};
 
-export const useGameStore = create<GameState & GameActions>((set) => ({
-  ...initialState,
-  setGameId: (gameId: string) => set({ gameId }),
-  setGameState: (state: Partial<GameState>) => set(state),
-  setLoading: (loading: boolean) => set({ loading }),
-  setError: (error: string | null) => set({ error }),
-  reset: () => set(initialState),
+  setGame: (game) => set({ game }),
+  setBusy: (busy) => set({ busy }),
+  setAnalyzing: (analyzing) => set({ analyzing }),
+  setHints: (hints) => set({ hints }),
+  setError: (error) => set({ error }),
+  reset: () => set({ game: null, busy: false, analyzing: false, hints: null, error: null }),
 }));
