@@ -39,8 +39,11 @@ export interface AiStep {
   value: any;
 }
 
+export type Difficulty = 'easy' | 'medium' | 'hard';
+
 export interface GameDto {
   game_id: string;
+  difficulty: Difficulty;
   seed: number;
   phase: string;
   current_player: number;
@@ -94,12 +97,33 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 
-export function createGame(playerName: string, seed?: number): Promise<GameDto> {
-  return request('/game/new', {
-    method: 'POST',
-    body: JSON.stringify(seed === undefined ? { player_name: playerName }
-                                            : { player_name: playerName, seed }),
-  });
+export function createGame(
+  playerName: string, seed?: number, difficulty: Difficulty = 'easy',
+): Promise<GameDto> {
+  const body: Record<string, unknown> = { player_name: playerName, difficulty };
+  if (seed !== undefined) body.seed = seed;
+  return request('/game/new', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export interface ReviewDecision {
+  ply: number;
+  turn: number;
+  phase: string;
+  chosen: { type: string; value: any };
+  rank: number | null;
+  n_options: number;
+  best: { type: string; value: any };
+}
+
+export interface ReviewDto {
+  game_id: string;
+  tier: string;
+  decisions: ReviewDecision[];
+  summary: { total: number; best: number; fine: number; weak: number };
+}
+
+export function getReview(gameId: string): Promise<ReviewDto> {
+  return request(`/game/${gameId}/review`);
 }
 
 export function getState(gameId: string): Promise<GameDto> {

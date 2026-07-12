@@ -10,8 +10,14 @@ interface GameBoardProps {
   game: GameDto;
   mode: BoardMode;
   hint: LegalAction | null;   // top recommendation, ringed in gold
+  heat?: Record<number, number>; // action index -> 0..1 trainer score (heatmap)
   disabled: boolean;
   onPick: (actionIndex: number) => void;
+}
+
+/** Placement-quality color: red (worst) -> green (best). */
+function heatColor(t: number, alpha: number): string {
+  return `hsla(${Math.round(120 * t)}, 75%, 55%, ${alpha})`;
 }
 
 const MODE_TYPES: Record<Exclude<BoardMode, null>, string> = {
@@ -123,7 +129,7 @@ function NumberChip({ at, n }: { at: PixelCoord; n: number }) {
  * edges are real DOM elements (no hand-rolled hit-testing), and pieces
  * animate in with CSS.
  */
-export default function GameBoard({ game, mode, hint, disabled, onPick }: GameBoardProps) {
+export default function GameBoard({ game, mode, hint, heat, disabled, onPick }: GameBoardProps) {
   const centers = game.hexes.map((h) => hexToPixel({ q: h.q, r: h.r }));
   const occupied = new Set(game.buildings.map((b) => vKey(b.vertex)));
 
@@ -229,16 +235,22 @@ export default function GameBoard({ game, mode, hint, disabled, onPick }: GameBo
           : <Settlement key={vKey(b.vertex)} at={at} color={PLAYER_COLORS[b.owner]} />;
       })}
 
-      {/* Clickable targets for the active mode */}
-      {targets.map((t) => (
-        <g key={t.index} className="board-target cursor-pointer" onClick={() => onPick(t.index)}>
-          <circle cx={t.at.x} cy={t.at.y} r={16} fill="transparent" />
-          <circle className="target-pulse" cx={t.at.x} cy={t.at.y} r={13}
-                  fill="rgba(134,239,172,0.22)" pointerEvents="none" />
-          <circle className="target-ring" cx={t.at.x} cy={t.at.y} r={8} fill="none"
-                  stroke="rgba(187,247,208,0.9)" strokeWidth={2} pointerEvents="none" />
-        </g>
-      ))}
+      {/* Clickable targets for the active mode; heat-colored when the trainer
+          has scored the options (green = its preference, red = weakest) */}
+      {targets.map((t) => {
+        const h = heat?.[t.index];
+        const fill = h === undefined ? 'rgba(134,239,172,0.22)' : heatColor(h, 0.4);
+        const ring = h === undefined ? 'rgba(187,247,208,0.9)' : heatColor(h, 0.95);
+        return (
+          <g key={t.index} className="board-target cursor-pointer" onClick={() => onPick(t.index)}>
+            <circle cx={t.at.x} cy={t.at.y} r={16} fill="transparent" />
+            <circle className="target-pulse" cx={t.at.x} cy={t.at.y} r={13}
+                    fill={fill} pointerEvents="none" />
+            <circle className="target-ring" cx={t.at.x} cy={t.at.y} r={8} fill="none"
+                    stroke={ring} strokeWidth={2} pointerEvents="none" />
+          </g>
+        );
+      })}
 
       {/* Gold ring on the trainer's top recommendation */}
       {hintAt && (

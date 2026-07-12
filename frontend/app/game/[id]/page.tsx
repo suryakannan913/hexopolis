@@ -13,6 +13,7 @@ import HandCards from '@/components/HandCards';
 import Toolbar from '@/components/Toolbar';
 import StatusCard from '@/components/StatusCard';
 import HintPanel from '@/components/HintPanel';
+import ReviewPanel from '@/components/ReviewPanel';
 
 export default function GamePage() {
   const params = useParams();
@@ -20,6 +21,7 @@ export default function GamePage() {
   const { game, busy, analyzing, hints, error, act, analyze, autoHint, setAutoHint, log } =
     useGame(gameId);
   const [mode, setMode] = useState<BoardMode>(null);
+  const [showReview, setShowReview] = useState(false);
 
   // Phases with exactly one kind of board interaction force the mode.
   const phase = game?.phase;
@@ -45,6 +47,18 @@ export default function GamePage() {
     ? { index: top.index, player: 0, type: top.type, value: top.value }
     : null;
 
+  // Placement heatmap: normalize the trainer's scores over the board-targeted
+  // options so target circles shade red (weak) -> green (trainer's pick).
+  let heat: Record<number, number> | undefined;
+  const scored = hints?.recommendations.filter(
+    (r) => isBoardAction(r.type) && (r.score !== undefined || r.win_probability !== undefined));
+  if (scored && scored.length >= 2) {
+    const vals = scored.map((r) => r.score ?? r.win_probability ?? 0);
+    const lo = Math.min(...vals);
+    const span = Math.max(...vals) - lo || 1;
+    heat = Object.fromEntries(scored.map((r, i) => [r.index, (vals[i] - lo) / span]));
+  }
+
   return (
     <main className="flex h-screen flex-col overflow-hidden bg-slate-900 text-white">
       <PromptBar game={game} error={error} />
@@ -56,22 +70,35 @@ export default function GamePage() {
             game={game}
             mode={mode}
             hint={boardHint}
+            heat={heat}
             disabled={busy || game.actor !== 0 || game.winner !== null}
             onPick={act}
           />
           {game.winner !== null && (
             <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70">
-              <div className="rounded-xl border border-amber-500/50 bg-slate-800 p-8 text-center">
-                <div className="text-3xl font-bold">
-                  {game.winner === 0 ? '🎉 You win!' : '🤖 The AI wins.'}
+              {showReview ? (
+                <ReviewPanel gameId={gameId} onClose={() => setShowReview(false)} />
+              ) : (
+                <div className="rounded-xl border border-amber-500/50 bg-slate-800 p-8 text-center">
+                  <div className="text-3xl font-bold">
+                    {game.winner === 0 ? '🎉 You win!' : '🤖 The AI wins.'}
+                  </div>
+                  <div className="mt-2 text-slate-300">
+                    {game.players[game.winner].total_vp} VP on turn {game.turn_number}
+                  </div>
+                  <div className="mt-4 flex justify-center gap-2">
+                    <button
+                      onClick={() => setShowReview(true)}
+                      className="rounded bg-amber-600 px-4 py-2 font-medium hover:bg-amber-500"
+                    >
+                      🎓 Review game
+                    </button>
+                    <Link href="/" className="inline-block rounded bg-blue-600 px-4 py-2 font-medium hover:bg-blue-500">
+                      New game
+                    </Link>
+                  </div>
                 </div>
-                <div className="mt-2 text-slate-300">
-                  {game.players[game.winner].total_vp} VP on turn {game.turn_number}
-                </div>
-                <Link href="/" className="mt-4 inline-block rounded bg-blue-600 px-4 py-2 font-medium hover:bg-blue-500">
-                  New game
-                </Link>
-              </div>
+              )}
             </div>
           )}
         </div>

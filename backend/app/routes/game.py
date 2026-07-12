@@ -71,6 +71,18 @@ def _policy_rng(seed: int, ply: int) -> random.Random:
     return random.Random(seed * 1_000_003 + ply)
 
 
+def _ai_choose(rec: GameRecord, acts) -> Action:
+    """Pick the AI's move by difficulty. All tiers are replay-safe: they never
+    draw from state.rng (the trainer tiers work on copies; the heuristic uses
+    the per-decision policy RNG)."""
+    state = rec.state
+    if rec.difficulty == "hard":
+        return alphabeta_recommend(state, depth=2, time_limit=3.0)[0].action
+    if rec.difficulty == "medium":
+        return value_recommend(state, seed=state.seed * 1_000_003 + rec.ply)[0].action
+    return choose_action(state, acts, _policy_rng(state.seed, rec.ply))
+
+
 def _json_value(x: Any) -> Any:
     if isinstance(x, Vertex):
         return {"vertex": sorted([c.q, c.r] for c in x.hex_coords)}
@@ -85,9 +97,10 @@ def _json_value(x: Any) -> Any:
     return x
 
 
-def _serialize(game_id: str, state: GameState) -> dict:
+def _serialize(game_id: str, state: GameState, difficulty: str = "easy") -> dict:
     return {
         "game_id": game_id,
+        "difficulty": difficulty,
         "seed": state.seed,
         "phase": state.phase.value,
         "current_player": state.current_player,
@@ -150,12 +163,13 @@ def create_game(request: GameCreateRequest):
     state = new_game((request.player_name, "AI Opponent"), seed=request.seed)
     games_db[game_id] = GameRecord(state, 0, request.difficulty)
     persistence.save_game(game_id, state.seed, request.player_name, request.difficulty)
-    return _serialize(game_id, state)
+    return _serialize(game_id, state, request.difficulty)
 
 
 @router.get("/{game_id}")
 def get_state(game_id: str):
-    return _serialize(game_id, _get(game_id).state)
+    rec = _get(game_id)
+    return _serialize(game_id, rec.state, rec.difficulty)
 
 
 @router.get("/{game_id}/log")
@@ -173,6 +187,52 @@ def get_log(game_id: str):
     }
 
 
+@router.get("/{game_id}/review")
+def review_game(game_id: str):
+    """Post-game (or mid-game) review: replay the action log and re-analyze
+    every human decision point with the instant value tier, reporting where
+    each chosen move ranked among the legal options.
+
+    Rank classes: 1 = the trainer's top choice, 2-3 = fine, deeper = weak.
+    Value-tier only: ~1ms per decision keeps a full-game review instant.
+    """
+    _get(game_id)  # 404 if unknown
+    seed, name, _, actions = persistence.load_game(game_id)
+    state = new_game((name, "AI Opponent"), seed=seed)
+
+    decisions = []
+    for ply, action in enumerate(actions):
+        if action.player == 0 and state.actor() == 0 and not state.is_terminal():
+            options = legal_actions(state)
+            if len(options) >= 2:
+                ranked = value_recommend(state, seed=seed * 1_000_003 + ply)
+                rank = next((i + 1 for i, r in enumerate(ranked) if r.action == action), None)
+                best = ranked[0].action
+                decisions.append({
+                    "ply": ply,
+                    "turn": state.turn_number,
+                    "phase": state.phase.value,
+                    "chosen": {"type": action.type.value, "value": _json_value(action.value)},
+                    "rank": rank,
+                    "n_options": len(options),
+                    "best": {"type": best.type.value, "value": _json_value(best.value)},
+                })
+        apply_action(state, action, validate=False)
+
+    ranks = [d["rank"] for d in decisions if d["rank"]]
+    return {
+        "game_id": game_id,
+        "tier": "value",
+        "decisions": decisions,
+        "summary": {
+            "total": len(decisions),
+            "best": sum(1 for r in ranks if r == 1),
+            "fine": sum(1 for r in ranks if 2 <= r <= 3),
+            "weak": sum(1 for r in ranks if r > 3),
+        },
+    }
+
+
 @router.post("/{game_id}/action")
 def post_action(game_id: str, request: ActionRequest):
     rec = _get(game_id)
@@ -180,7 +240,7 @@ def post_action(game_id: str, request: ActionRequest):
     if not 0 <= request.index < len(acts):
         raise HTTPException(status_code=400, detail=f"action index out of range (0..{len(acts)-1})")
     _apply_and_record(game_id, rec, acts[request.index])
-    return _serialize(game_id, rec.state)
+    return _serialize(game_id, rec.state, rec.difficulty)
 
 
 @router.get("/{game_id}/recommend")
@@ -248,12 +308,12 @@ def ai_turn(game_id: str):
         acts = legal_actions(state)
         # Policy randomness must NOT come from state.rng: replay applies the
         # logged actions without re-deciding, so any policy draws taken from
-        # the game stream would make live and replayed dice diverge. A fresh
-        # RNG keyed by (seed, ply) is deterministic and stream-independent.
-        action = choose_action(state, acts, _policy_rng(state.seed, rec.ply))
+        # the game stream would make live and replayed dice diverge. All
+        # difficulty tiers are stream-independent (see _ai_choose).
+        action = _ai_choose(rec, acts)
         _apply_and_record(game_id, rec, action)
         steps.append(action)
-    out = _serialize(game_id, state)
+    out = _serialize(game_id, state, rec.difficulty)
     out["steps"] = [
         {"player": a.player, "type": a.type.value, "value": _json_value(a.value)}
         for a in steps

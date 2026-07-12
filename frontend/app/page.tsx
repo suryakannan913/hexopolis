@@ -2,12 +2,19 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createGame } from '@/lib/api';
+import { createGame, type Difficulty } from '@/lib/api';
+
+const DIFFICULTIES: { id: Difficulty; label: string; blurb: string }[] = [
+  { id: 'easy', label: 'Easy', blurb: 'simple heuristic' },
+  { id: 'medium', label: 'Medium', blurb: 'value function' },
+  { id: 'hard', label: 'Hard', blurb: 'expectiminimax search' },
+];
 
 export default function Home() {
   const router = useRouter();
   const [playerName, setPlayerName] = useState('');
   const [seed, setSeed] = useState('');
+  const [difficulty, setDifficulty] = useState<Difficulty>('easy');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,7 +24,8 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      const game = await createGame(playerName.trim(), seed ? Number(seed) : undefined);
+      const game = await createGame(
+        playerName.trim(), seed ? Number(seed) : undefined, difficulty);
       router.push(`/game/${game.game_id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create game');
@@ -45,6 +53,26 @@ export default function Home() {
               disabled={loading}
               className="w-full rounded border border-slate-600 bg-slate-700 px-4 py-2 focus:border-blue-500 focus:outline-none"
             />
+          </div>
+          <div>
+            <span className="mb-2 block text-sm font-medium">Opponent difficulty</span>
+            <div className="grid grid-cols-3 gap-2">
+              {DIFFICULTIES.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => setDifficulty(d.id)}
+                  className={`rounded border px-2 py-2 text-sm transition ${
+                    difficulty === d.id
+                      ? 'border-blue-500 bg-blue-600/30 font-semibold'
+                      : 'border-slate-600 bg-slate-700 hover:bg-slate-600'
+                  }`}
+                >
+                  <div>{d.label}</div>
+                  <div className="text-[10px] text-slate-400">{d.blurb}</div>
+                </button>
+              ))}
+            </div>
           </div>
           <div>
             <label htmlFor="seed" className="mb-2 block text-sm font-medium">
