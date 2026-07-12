@@ -8,35 +8,67 @@ NOTE: this is an action-based API; the pre-engine frontend spoke an older
 contract and needs rework before it can drive this (tracked in ROADMAP.md).
 """
 import random
+import uuid
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.engine import GameState, apply_action, legal_actions, new_game
+from app import persistence
+from app.engine import GameState, apply_action, legal_actions, longest_road_length, new_game
+from app.engine.actions import Action
 from app.engine.policy import choose_action
 from app.models.board import Edge, HexCoord, Resource, Vertex
 from app.trainer import alphabeta_recommend, mcts_recommend, recommend, value_recommend
 
 router = APIRouter(prefix="/game", tags=["game"])
 
-games_db: Dict[str, GameState] = {}
-_counter = 0
+
+@dataclass
+class GameRecord:
+    state: GameState
+    ply: int            # actions applied so far (next action's index in the log)
+    difficulty: str
+
+
+# In-memory cache over the event-sourced store: a cache miss (e.g. after a
+# server restart) rebuilds the state by replaying the persisted action log.
+games_db: Dict[str, GameRecord] = {}
 
 
 class GameCreateRequest(BaseModel):
     player_name: str
     seed: Optional[int] = None
+    difficulty: str = "easy"
 
 
 class ActionRequest(BaseModel):
     index: int  # index into the legal_actions list of the current state
 
 
-def _get(game_id: str) -> GameState:
-    if game_id not in games_db:
-        raise HTTPException(status_code=404, detail="Game not found")
-    return games_db[game_id]
+def _get(game_id: str) -> GameRecord:
+    rec = games_db.get(game_id)
+    if rec is None:
+        stored = persistence.load_game(game_id)
+        if stored is None:
+            raise HTTPException(status_code=404, detail="Game not found")
+        seed, name, difficulty, actions = stored
+        rec = GameRecord(persistence.replay(seed, name, actions), len(actions), difficulty)
+        games_db[game_id] = rec
+    return rec
+
+
+def _apply_and_record(game_id: str, rec: GameRecord, action: Action) -> None:
+    apply_action(rec.state, action, validate=False)
+    persistence.append_action(game_id, rec.ply, action)
+    rec.ply += 1
+
+
+def _policy_rng(seed: int, ply: int) -> random.Random:
+    """Deterministic per-decision RNG for the AI policy, independent of the
+    game's own stream (see the replay-divergence note in ai_turn)."""
+    return random.Random(seed * 1_000_003 + ply)
 
 
 def _json_value(x: Any) -> Any:
@@ -85,6 +117,7 @@ def _serialize(game_id: str, state: GameState) -> dict:
             {"edge": _json_value(e)["edge"], "owner": o}
             for e, o in state.roads.items()
         ],
+        "discard_quota": list(state.discard_quota),
         "players": [
             {
                 "id": p.id, "name": p.name,
@@ -96,6 +129,7 @@ def _serialize(game_id: str, state: GameState) -> dict:
                 "cities_left": p.cities_left,
                 "visible_vp": state.visible_vp(p.id),
                 "total_vp": state.total_vp(p.id),
+                "longest_road": longest_road_length(state, p.id),
             }
             for p in state.players
         ],
@@ -110,26 +144,43 @@ def _serialize(game_id: str, state: GameState) -> dict:
 
 @router.post("/new", status_code=201)
 def create_game(request: GameCreateRequest):
-    global _counter
-    _counter += 1
-    game_id = f"game-{_counter}"
-    games_db[game_id] = new_game((request.player_name, "AI Opponent"), seed=request.seed)
-    return _serialize(game_id, games_db[game_id])
+    if request.difficulty not in ("easy", "medium", "hard"):
+        raise HTTPException(status_code=400, detail="difficulty must be easy, medium, or hard")
+    game_id = uuid.uuid4().hex[:8]
+    state = new_game((request.player_name, "AI Opponent"), seed=request.seed)
+    games_db[game_id] = GameRecord(state, 0, request.difficulty)
+    persistence.save_game(game_id, state.seed, request.player_name, request.difficulty)
+    return _serialize(game_id, state)
 
 
 @router.get("/{game_id}")
 def get_state(game_id: str):
-    return _serialize(game_id, _get(game_id))
+    return _serialize(game_id, _get(game_id).state)
+
+
+@router.get("/{game_id}/log")
+def get_log(game_id: str):
+    """Ordered action history (the game's durable, replayable form)."""
+    _get(game_id)  # 404 if unknown
+    stored = persistence.load_game(game_id)
+    seed, name, difficulty, actions = stored
+    return {
+        "game_id": game_id, "seed": seed, "player_name": name, "difficulty": difficulty,
+        "actions": [
+            {"ply": i, "player": a.player, "type": a.type.value, "value": _json_value(a.value)}
+            for i, a in enumerate(actions)
+        ],
+    }
 
 
 @router.post("/{game_id}/action")
 def post_action(game_id: str, request: ActionRequest):
-    state = _get(game_id)
-    acts = legal_actions(state)
+    rec = _get(game_id)
+    acts = legal_actions(rec.state)
     if not 0 <= request.index < len(acts):
         raise HTTPException(status_code=400, detail=f"action index out of range (0..{len(acts)-1})")
-    apply_action(state, acts[request.index], validate=False)
-    return _serialize(game_id, state)
+    _apply_and_record(game_id, rec, acts[request.index])
+    return _serialize(game_id, rec.state)
 
 
 @router.get("/{game_id}/recommend")
@@ -146,7 +197,7 @@ def recommend_moves(game_id: str, tier: str = "mc", sims: Optional[int] = None,
     list, so a client can act on a recommendation via POST /action directly.
     The game state is not mutated.
     """
-    state = _get(game_id)
+    state = _get(game_id).state
     if state.is_terminal():
         raise HTTPException(status_code=400, detail="Game is over")
     index_of = {a: i for i, a in enumerate(legal_actions(state))}
@@ -186,12 +237,25 @@ def recommend_moves(game_id: str, tier: str = "mc", sims: Optional[int] = None,
 
 @router.post("/{game_id}/ai-turn")
 def ai_turn(game_id: str):
-    """Step the heuristic AI (player 1) until control returns to player 0 or
-    the game ends. Stops early if player 0 must decide (e.g. a discard)."""
-    state = _get(game_id)
-    steps = 0
-    while not state.is_terminal() and state.actor() == 1 and steps < 10_000:
+    """Step the AI (player 1) until control returns to player 0 or the game
+    ends. Stops early if player 0 must decide (e.g. a discard). The response
+    includes `steps` — each action the AI took, in order — so clients can
+    show a true play-by-play instead of diffing states."""
+    rec = _get(game_id)
+    state = rec.state
+    steps = []
+    while not state.is_terminal() and state.actor() == 1 and len(steps) < 10_000:
         acts = legal_actions(state)
-        apply_action(state, choose_action(state, acts, state.rng), validate=False)
-        steps += 1
-    return _serialize(game_id, state)
+        # Policy randomness must NOT come from state.rng: replay applies the
+        # logged actions without re-deciding, so any policy draws taken from
+        # the game stream would make live and replayed dice diverge. A fresh
+        # RNG keyed by (seed, ply) is deterministic and stream-independent.
+        action = choose_action(state, acts, _policy_rng(state.seed, rec.ply))
+        _apply_and_record(game_id, rec, action)
+        steps.append(action)
+    out = _serialize(game_id, state)
+    out["steps"] = [
+        {"player": a.player, "type": a.type.value, "value": _json_value(a.value)}
+        for a in steps
+    ]
+    return out

@@ -10,7 +10,7 @@ export default function PromptBar({ game, error }: { game: GameDto; error: strin
   else if (game.phase === 'setup_settlement') prompt = 'Place a settlement';
   else if (game.phase === 'setup_road') prompt = 'Place a road';
   else if (game.phase === 'move_robber') prompt = 'Move the robber';
-  else if (game.phase === 'discard') prompt = 'Discard cards';
+  else if (game.phase === 'discard') prompt = `Discard ${game.discard_quota[0]} more cards`;
   else if (game.legal_actions.some((a) => a.type === 'roll')) prompt = 'Roll the dice';
   else prompt = 'Build, trade, or end turn';
 

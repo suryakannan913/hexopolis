@@ -19,9 +19,12 @@ export function useGame(gameId: string) {
   const [log, setLog] = useState<LogEntry[]>([]);
   const aiPending = useRef(false);
 
-  const applyState = useCallback((next: Parameters<typeof setGame>[0], echo?: string) => {
+  const applyState = useCallback((
+    next: Parameters<typeof setGame>[0], echo?: string,
+    steps?: { player: number; type: string; value: any }[],
+  ) => {
     const prev = useGameStore.getState().game;
-    setLog((l) => [...l, ...diffStates(prev, next, echo)].slice(-120));
+    setLog((l) => [...l, ...diffStates(prev, next, echo, steps)].slice(-120));
     setGame(next);
   }, [setGame]);
 
@@ -56,7 +59,8 @@ export function useGame(gameId: string) {
     setBusy(true);
     const timer = setTimeout(async () => {
       try {
-        applyState(await aiTurn(gameId));
+        const next = await aiTurn(gameId);
+        applyState(next, undefined, next.steps);
         setError(null);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'AI turn failed');

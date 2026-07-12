@@ -29,6 +29,14 @@ export interface PlayerDto {
   cities_left: number;
   visible_vp: number;
   total_vp: number;
+  longest_road: number;
+}
+
+/** One action the AI took during /ai-turn, in play order. */
+export interface AiStep {
+  player: number;
+  type: string;
+  value: any;
 }
 
 export interface GameDto {
@@ -44,6 +52,7 @@ export interface GameDto {
   robber: Pair;
   bank: Record<string, number>;
   dev_deck_remaining: number;
+  discard_quota: [number, number];
   hexes: { q: number; r: number; resource: string | null; number: number | null }[];
   ports: { vertex: Pair[]; type: string }[];
   buildings: { vertex: Pair[]; owner: number; kind: string }[];
@@ -104,7 +113,7 @@ export function postAction(gameId: string, index: number): Promise<GameDto> {
   });
 }
 
-export function aiTurn(gameId: string): Promise<GameDto> {
+export function aiTurn(gameId: string): Promise<GameDto & { steps: AiStep[] }> {
   return request(`/game/${gameId}/ai-turn`, { method: 'POST' });
 }
 

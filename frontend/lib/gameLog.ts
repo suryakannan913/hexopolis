@@ -1,5 +1,12 @@
 import type { GameDto } from '@/lib/api';
+import { describeAction } from '@/lib/describe';
 import { RESOURCE_ORDER } from '@/lib/theme';
+
+/** Steps arrive with API-shaped values ({vertex}, {edge}, resource strings) —
+ * the same shape describeAction handles for hints/legal actions. */
+function describeStep(s: { type: string; value: any }): string {
+  return describeAction(s);
+}
 
 export interface LogEntry {
   id: number;
@@ -15,51 +22,61 @@ const entry = (player: number | null, text: string, icons?: string[]): LogEntry 
 const vKey = (v: [number, number][]) => v.map((p) => p.join(',')).join('|');
 
 /**
- * Derive log lines from a state transition. The server has no event stream;
- * everything a turn did is recoverable by diffing consecutive DTOs.
+ * Derive log lines from a state transition.
  * `echo` is the human's own action label (known client-side at post time).
+ * `steps` is the server's per-action report from an AI turn — when present
+ * it provides the exact ordered play-by-play, so the structural diffing
+ * (builds, roads, robber, cards) is skipped to avoid duplicate lines; only
+ * dice and resource flows are still derived here.
  */
-export function diffStates(prev: GameDto | null, next: GameDto, echo?: string): LogEntry[] {
+export function diffStates(prev: GameDto | null, next: GameDto, echo?: string,
+                           steps?: { player: number; type: string; value: any }[]): LogEntry[] {
   const out: LogEntry[] = [];
   if (!prev) return out;
   const who = prev.actor ?? prev.current_player; // who was deciding before this transition
 
   if (echo) out.push(entry(0, echo));
+  if (steps) {
+    for (const s of steps) {
+      if (s.type === 'roll' || s.type === 'end_turn') continue; // dice line below; end_turn is noise
+      out.push(entry(s.player, describeStep(s)));
+    }
+  }
 
   if (next.last_roll && JSON.stringify(next.last_roll) !== JSON.stringify(prev.last_roll)) {
     const [a, b] = next.last_roll;
     out.push(entry(who, `rolled ${a} + ${b} = ${a + b}`));
   }
 
-  // New buildings / roads
-  const prevB = new Map(prev.buildings.map((b) => [vKey(b.vertex), b.kind]));
-  for (const b of next.buildings) {
-    const k = vKey(b.vertex);
-    if (!prevB.has(k)) out.push(entry(b.owner, `placed a ${b.kind}`));
-    else if (prevB.get(k) !== b.kind) out.push(entry(b.owner, 'upgraded to a city'));
-  }
-  const prevRoads = [0, 0];
-  const nextRoads = [0, 0];
-  prev.roads.forEach((r) => prevRoads[r.owner]++);
-  next.roads.forEach((r) => nextRoads[r.owner]++);
-  for (const pid of [0, 1]) {
-    const n = nextRoads[pid] - prevRoads[pid];
-    if (n > 0) out.push(entry(pid, n === 1 ? 'placed a road' : `placed ${n} roads`));
-  }
-
-  for (const pid of [0, 1]) {
-    const dk = next.players[pid].knights_played - prev.players[pid].knights_played;
-    if (dk > 0) out.push(entry(pid, 'played a Knight ⚔️'));
-    const devDelta =
-      Object.values(next.players[pid].dev_cards).reduce((a, b) => a + b, 0) -
-      Object.values(prev.players[pid].dev_cards).reduce((a, b) => a + b, 0);
-    if (devDelta > 0 && next.dev_deck_remaining < prev.dev_deck_remaining && pid !== 0) {
-      out.push(entry(pid, 'bought a development card'));
+  if (!steps) {
+    // No server play-by-play: reconstruct structural events by diffing.
+    const prevB = new Map(prev.buildings.map((b) => [vKey(b.vertex), b.kind]));
+    for (const b of next.buildings) {
+      const k = vKey(b.vertex);
+      if (!prevB.has(k)) out.push(entry(b.owner, `placed a ${b.kind}`));
+      else if (prevB.get(k) !== b.kind) out.push(entry(b.owner, 'upgraded to a city'));
     }
-  }
-
-  if (JSON.stringify(next.robber) !== JSON.stringify(prev.robber)) {
-    out.push(entry(who, 'moved the robber 🦹'));
+    const prevRoads = [0, 0];
+    const nextRoads = [0, 0];
+    prev.roads.forEach((r) => prevRoads[r.owner]++);
+    next.roads.forEach((r) => nextRoads[r.owner]++);
+    for (const pid of [0, 1]) {
+      const n = nextRoads[pid] - prevRoads[pid];
+      if (n > 0) out.push(entry(pid, n === 1 ? 'placed a road' : `placed ${n} roads`));
+    }
+    for (const pid of [0, 1]) {
+      const dk = next.players[pid].knights_played - prev.players[pid].knights_played;
+      if (dk > 0) out.push(entry(pid, 'played a Knight ⚔️'));
+      const devDelta =
+        Object.values(next.players[pid].dev_cards).reduce((a, b) => a + b, 0) -
+        Object.values(prev.players[pid].dev_cards).reduce((a, b) => a + b, 0);
+      if (devDelta > 0 && next.dev_deck_remaining < prev.dev_deck_remaining && pid !== 0) {
+        out.push(entry(pid, 'bought a development card'));
+      }
+    }
+    if (JSON.stringify(next.robber) !== JSON.stringify(prev.robber)) {
+      out.push(entry(who, 'moved the robber 🦹'));
+    }
   }
 
   // Your resource flows (gains always; losses only on the opponent's moves)

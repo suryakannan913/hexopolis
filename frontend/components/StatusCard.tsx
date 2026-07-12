@@ -25,7 +25,7 @@ function OnePlayer({ game, pid }: { game: GameDto; pid: number }) {
         <div className="flex gap-2.5 text-[11px] text-slate-400">
           <span title="Hidden dev cards">🃏 {devs}</span>
           <span title="Knights played">⚔️ {p.knights_played}</span>
-          <span title="Roads placed">🛤 {15 - p.roads_left}</span>
+          <span title="Longest road length">🛤 {p.longest_road}</span>
           {game.longest_road_owner === pid && <span className="text-amber-300" title="Longest Road">🛤+2</span>}
           {game.largest_army_owner === pid && <span className="text-amber-300" title="Largest Army">⚔️+2</span>}
         </div>
