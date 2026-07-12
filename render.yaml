@@ -1,0 +1,18 @@
+# Render blueprint for the backend (the frontend deploys to Vercel).
+services:
+  - type: web
+    name: hexopolis-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: ALLOWED_ORIGINS
+        sync: false          # set to the deployed Vercel origin, e.g. https://hexopolis.vercel.app
+      - key: HEXOPOLIS_DB
+        value: /var/data/hexopolis.db
+    disk:
+      name: hexopolis-data
+      mountPath: /var/data   # persistent disk so the event-sourced games survive deploys
+      sizeGB: 1

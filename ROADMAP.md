@@ -20,15 +20,28 @@ recommendation stack, and a web UI that plays against a bot with move hints.
   highlight on the recommended placement).
 - **Tests** — 129 backend tests, green.
 
+## Done since
+
+- [x] **Perf**: board-geometry memoization + structural GameState.copy()
+  (13x cheaper copies; MC analysis 10s -> ~4s).
+- [x] **Persistence**: event-sourced SQLite store (seed + action log); games
+  survive restarts by deterministic replay.
+- [x] **SVG board**: viewBox scaling, DOM hit-testing, piece pop animations,
+  always-visible open spots, port boats.
+- [x] **Difficulty tiers**: easy (heuristic) / medium (value fn) / hard
+  (expectiminimax), all replay-safe.
+- [x] **Placement heatmap** (trainer scores shade the legal spots) and
+  **post-game review** (per-decision rank vs the trainer, BEST/OK/WEAK).
+- [x] **CI**: GitHub Actions running pytest + frontend typecheck/build;
+  Render/Vercel deploy configs.
+
 ## Next
 
-- [ ] **Domestic (player↔player) trade** — engine action + simple AI accept
-  logic (D1 in the rules doc; deliberately deferred).
-- [ ] **Stronger AI opponent** — the server bot is a simple heuristic; wire it
-  to the alpha-beta tier for a real challenge.
-- [ ] **Trainer UX** — post-game review (re-analyze each of your moves),
-  "blunder" flagging when your move ranks far below the recommendation.
-- [ ] **Persistence** — games live in memory; move to a DB for restarts.
-- [ ] **Deploy** — Vercel (frontend) + Render (backend), CI running pytest.
-- [ ] **Board polish** — piece animations, mobile layout, screenshot for the
-  README.
+- [ ] **Deploy for real** — connect the repo on Render + Vercel (configs are
+  in place; needs account hookup).
+- [ ] **Domestic (player↔player) trade** — engine action + AI accept logic
+  (D1 in the rules doc; deliberately deferred).
+- [ ] **Win-probability review** — review currently uses the instant value
+  tier; add an opt-in MC pass for probability-based blunder margins.
+- [ ] **Frontend tests** — vitest for gameLog diffing, one Playwright flow.
+- [ ] **Mobile layout** + README screenshot.

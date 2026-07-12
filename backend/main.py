@@ -5,10 +5,19 @@ from app.routes import game
 
 app = FastAPI(title="Hexopolis API", version="0.1.0")
 
-# Enable CORS for frontend
+# Enable CORS for the frontend. Local dev origins are always allowed;
+# a deployed frontend origin is added via ALLOWED_ORIGINS (comma-separated).
+import os
+
+_origins = [
+    "http://localhost:3000", "http://127.0.0.1:3000",
+    "http://localhost:3001", "http://127.0.0.1:3001",
+]
+_origins += [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

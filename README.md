@@ -88,6 +88,16 @@ cd backend && pytest
 4. Spend resources to build **roads** (wood + brick) and **settlements** (wood + brick + wheat + sheep). Settlements must connect to your road network and can't sit next to another settlement.
 5. First to **10 points** wins.
 
+## Deployment
+
+CI (GitHub Actions) runs `pytest` and the frontend typecheck/build on every push.
+
+- **Backend → Render**: [render.yaml](render.yaml) blueprint — uvicorn app with a
+  persistent disk for the SQLite event store (`HEXOPOLIS_DB`). Set
+  `ALLOWED_ORIGINS` to the deployed frontend origin.
+- **Frontend → Vercel**: import the repo, set the root directory to `frontend/`
+  and `NEXT_PUBLIC_API_URL` to the Render URL.
+
 ## Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for the prioritized plan: known bugs, gameplay gaps (bank trading, robber on 7), and the UI direction toward a Colonist.io-style client.
