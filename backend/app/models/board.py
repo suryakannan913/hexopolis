@@ -127,6 +127,11 @@ class Board:
         When omitted, the legacy fixed layout is used (geometry tests only).
         """
         self.hexes: Dict[HexCoord, Hex] = {}
+        # Geometry memo: board topology is immutable after construction, and
+        # these lookups are the engine's hottest path (legality checks call
+        # them thousands of times per game). Values are shared — callers must
+        # treat returned lists/sets as read-only.
+        self._memo: Dict = {}
         if layout is None:
             self._init_hexes()
         else:
@@ -179,43 +184,54 @@ class Board:
 
     def get_vertices_for_hex(self, coord: HexCoord) -> List[Vertex]:
         """Get all 6 vertices (corners) of a hex.
-        Each vertex is shared by up to 3 hexes."""
-        neighbors = coord.neighbors()
-        vertices = []
-        # Each hex has 6 vertices defined by combinations of itself and neighbors
-        for i in range(6):
-            neighbor1 = neighbors[i]
-            neighbor2 = neighbors[(i + 1) % 6]
-            vertex = Vertex((coord, neighbor1, neighbor2))
-            vertices.append(vertex)
-        return vertices
+        Each vertex is shared by up to 3 hexes. (Memoized; treat as read-only.)"""
+        key = ('vfh', coord)
+        hit = self._memo.get(key)
+        if hit is None:
+            neighbors = coord.neighbors()
+            hit = [Vertex((coord, neighbors[i], neighbors[(i + 1) % 6]))
+                   for i in range(6)]
+            self._memo[key] = hit
+        return hit
 
     def get_edges_for_hex(self, coord: HexCoord) -> List[Edge]:
-        """Get all 6 edges of a hex."""
-        neighbors = coord.neighbors()
-        edges = []
-        for i in range(6):
-            edge = Edge(coord, neighbors[i])
-            edges.append(edge)
-        return edges
+        """Get all 6 edges of a hex. (Memoized; treat as read-only.)"""
+        key = ('efh', coord)
+        hit = self._memo.get(key)
+        if hit is None:
+            hit = [Edge(coord, n) for n in coord.neighbors()]
+            self._memo[key] = hit
+        return hit
 
     def get_edges_for_vertex(self, vertex: Vertex) -> List[Edge]:
         """Get the 3 edges incident to a vertex.
 
         A vertex is the corner shared by 3 hexes (a, b, c). The edges meeting
         at that corner are the borders between each pair of those hexes.
+        (Memoized; treat as read-only.)
         """
-        a, b, c = vertex.hex_coords
-        return [Edge(a, b), Edge(b, c), Edge(a, c)]
+        key = ('efv', vertex)
+        hit = self._memo.get(key)
+        if hit is None:
+            a, b, c = vertex.hex_coords
+            hit = [Edge(a, b), Edge(b, c), Edge(a, c)]
+            self._memo[key] = hit
+        return hit
 
     def get_edge_endpoints(self, edge: Edge) -> List[Vertex]:
         """Get the 2 vertices at the ends of an edge.
 
         An edge borders hexes h1 and h2. The two adjacent hexes that h1 and h2
         share (their common neighbors) define the two endpoint corners.
+        (Memoized; treat as read-only.)
         """
-        common = [n for n in edge.hex1.neighbors() if n in set(edge.hex2.neighbors())]
-        return [Vertex((edge.hex1, edge.hex2, c)) for c in common]
+        key = ('eep', edge)
+        hit = self._memo.get(key)
+        if hit is None:
+            common = [n for n in edge.hex1.neighbors() if n in set(edge.hex2.neighbors())]
+            hit = [Vertex((edge.hex1, edge.hex2, c)) for c in common]
+            self._memo[key] = hit
+        return hit
 
     def get_hexes_for_vertex(self, vertex: Vertex) -> List[Hex]:
         """Get up to 3 hexes that share a vertex."""
@@ -248,17 +264,17 @@ class Board:
         return list(adjacent_vertices)
 
     def get_all_vertices(self) -> Set[Vertex]:
-        """Get all valid vertices on the board."""
-        vertices = set()
-        for hex_coord in self.hexes:
-            for vertex in self.get_vertices_for_hex(hex_coord):
-                vertices.add(vertex)
-        return vertices
+        """Get all valid vertices on the board. (Memoized; treat as read-only.)"""
+        hit = self._memo.get('allv')
+        if hit is None:
+            hit = {v for c in self.hexes for v in self.get_vertices_for_hex(c)}
+            self._memo['allv'] = hit
+        return hit
 
     def get_all_edges(self) -> Set[Edge]:
-        """Get all valid edges on the board."""
-        edges = set()
-        for hex_coord in self.hexes:
-            for edge in self.get_edges_for_hex(hex_coord):
-                edges.add(edge)
-        return edges
+        """Get all valid edges on the board. (Memoized; treat as read-only.)"""
+        hit = self._memo.get('alle')
+        if hit is None:
+            hit = {e for c in self.hexes for e in self.get_edges_for_hex(c)}
+            self._memo['alle'] = hit
+        return hit
