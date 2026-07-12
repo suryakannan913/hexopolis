@@ -1,17 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GameDto, LegalAction, Pair } from '@/lib/api';
-import {
-  HEX_RADIUS,
-  drawHex,
-  drawNumberChip,
-  drawRoad,
-  drawSettlement,
-  fillHexShape,
-  hexToPixel,
-  type PixelCoord,
-} from '@/lib/hexUtils';
+import { HEX_RADIUS, hexCorners, hexToPixel, pointsAttr, type PixelCoord } from '@/lib/hexUtils';
 import { PLAYER_COLORS, resourceIcon, terrainColor } from '@/lib/theme';
 
 export type BoardMode = 'settlement' | 'road' | 'city' | 'robber' | null;
@@ -33,10 +23,8 @@ const MODE_TYPES: Record<Exclude<BoardMode, null>, string> = {
 
 const DIRS: Pair[] = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
 
-interface Target { x: number; y: number; index: number }
-
-function centroid(pairs: Pair[], ox: number, oy: number): PixelCoord {
-  const pts = pairs.map(([q, r]) => hexToPixel({ q, r }, ox, oy));
+function centroid(pairs: Pair[]): PixelCoord {
+  const pts = pairs.map(([q, r]) => hexToPixel({ q, r }));
   return {
     x: pts.reduce((s, p) => s + p.x, 0) / pts.length,
     y: pts.reduce((s, p) => s + p.y, 0) / pts.length,
@@ -44,24 +32,26 @@ function centroid(pairs: Pair[], ox: number, oy: number): PixelCoord {
 }
 
 /** True endpoints of the edge between two hexes = the two shared corners. */
-function edgeEndpoints(edge: Pair[], ox: number, oy: number): [PixelCoord, PixelCoord] {
+function edgeEndpoints(edge: Pair[]): [PixelCoord, PixelCoord] {
   const [a, b] = edge;
   const bNeighbors = new Set(DIRS.map((d) => `${b[0] + d[0]},${b[1] + d[1]}`));
   const shared = DIRS.map((d): Pair => [a[0] + d[0], a[1] + d[1]])
     .filter((p) => bNeighbors.has(`${p[0]},${p[1]}`));
-  return [centroid([a, b, shared[0]], ox, oy), centroid([a, b, shared[1]], ox, oy)];
+  return [centroid([a, b, shared[0]]), centroid([a, b, shared[1]])];
 }
 
-/** Pixel anchor for a board-targeted action (vertex, edge, or hex). */
-function actionAnchor(a: LegalAction, ox: number, oy: number): PixelCoord | null {
-  if (a.value?.vertex) return centroid(a.value.vertex, ox, oy);
+/** Anchor point of a board-targeted action (vertex, edge, or hex). */
+function actionAnchor(a: { type: string; value: any }): PixelCoord | null {
+  if (a.value?.vertex) return centroid(a.value.vertex);
   if (a.value?.edge) {
-    const [p1, p2] = edgeEndpoints(a.value.edge, ox, oy);
+    const [p1, p2] = edgeEndpoints(a.value.edge);
     return { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
   }
-  if (a.value?.hex) return hexToPixel({ q: a.value.hex[0], r: a.value.hex[1] }, ox, oy);
+  if (a.value?.hex) return hexToPixel({ q: a.value.hex[0], r: a.value.hex[1] });
   return null;
 }
+
+const vKey = (v: Pair[]) => v.map((p) => p.join(',')).join('|');
 
 /** All 54 vertex triples of the board, keyed like the server serializes them. */
 function allVertices(game: GameDto): Pair[][] {
@@ -73,217 +63,188 @@ function allVertices(game: GameDto): Pair[][] {
       const n2: Pair = [h.q + DIRS[(i + 1) % 6][0], h.r + DIRS[(i + 1) % 6][1]];
       const triple = ([[h.q, h.r], n1, n2] as Pair[])
         .slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-      const key = triple.map((p) => p.join(',')).join('|');
+      const key = vKey(triple);
       if (!seen.has(key)) { seen.add(key); out.push(triple); }
     }
   }
   return out;
 }
 
-function drawCity(ctx: CanvasRenderingContext2D, c: PixelCoord, color: string) {
-  ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.35)';
-  ctx.shadowBlur = 4;
-  ctx.fillStyle = color;
-  ctx.strokeStyle = '#1e293b';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath(); // wide base + tower with roof
-  ctx.moveTo(c.x - 12, c.y + 8);
-  ctx.lineTo(c.x - 12, c.y - 2);
-  ctx.lineTo(c.x - 4, c.y - 2);
-  ctx.lineTo(c.x - 4, c.y - 10);
-  ctx.lineTo(c.x + 1, c.y - 15);
-  ctx.lineTo(c.x + 6, c.y - 10);
-  ctx.lineTo(c.x + 6, c.y - 2);
-  ctx.lineTo(c.x + 12, c.y - 2);
-  ctx.lineTo(c.x + 12, c.y + 8);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
+function Settlement({ at, color }: { at: PixelCoord; color: string }) {
+  const s = 11;
+  const pts: PixelCoord[] = [
+    { x: at.x, y: at.y - s },
+    { x: at.x + s * 0.85, y: at.y - s * 0.25 },
+    { x: at.x + s * 0.6, y: at.y - s * 0.25 },
+    { x: at.x + s * 0.6, y: at.y + s * 0.7 },
+    { x: at.x - s * 0.6, y: at.y + s * 0.7 },
+    { x: at.x - s * 0.6, y: at.y - s * 0.25 },
+    { x: at.x - s * 0.85, y: at.y - s * 0.25 },
+  ];
+  return <polygon className="piece-pop" points={pointsAttr(pts)} fill={color}
+                  stroke="#1e293b" strokeWidth={1.5} />;
 }
 
+function City({ at, color }: { at: PixelCoord; color: string }) {
+  const p: Pair[] = [
+    [-12, 8], [-12, -2], [-4, -2], [-4, -10], [1, -15], [6, -10], [6, -2], [12, -2], [12, 8],
+  ];
+  return (
+    <polygon
+      className="piece-pop"
+      points={p.map(([dx, dy]) => `${at.x + dx},${at.y + dy}`).join(' ')}
+      fill={color} stroke="#1e293b" strokeWidth={1.5}
+    />
+  );
+}
+
+function NumberChip({ at, n }: { at: PixelCoord; n: number }) {
+  const hot = n === 6 || n === 8;
+  const color = hot ? '#b91c1c' : '#1f2937';
+  const pips = 6 - Math.abs(7 - n);
+  return (
+    <g pointerEvents="none">
+      <circle cx={at.x} cy={at.y} r={15} fill="#f5ecd7"
+              stroke={hot ? '#b91c1c' : '#9ca3af'} strokeWidth={1.5} />
+      <text x={at.x} y={at.y + 1} textAnchor="middle" dominantBaseline="middle"
+            fontSize={15} fontWeight={700} fill={color} fontFamily="Georgia, serif">
+        {n}
+      </text>
+      {Array.from({ length: pips }).map((_, i) => (
+        <circle key={i} cx={at.x - ((pips - 1) * 3.4) / 2 + i * 3.4} cy={at.y + 9.5}
+                r={1.3} fill={color} />
+      ))}
+    </g>
+  );
+}
+
+/**
+ * The board as pure SVG: the viewBox scales to any container, vertices and
+ * edges are real DOM elements (no hand-rolled hit-testing), and pieces
+ * animate in with CSS.
+ */
 export default function GameBoard({ game, mode, hint, disabled, onPick }: GameBoardProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [hover, setHover] = useState<Target | null>(null);
-  const [, forceRedraw] = useState(0);
+  const centers = game.hexes.map((h) => hexToPixel({ q: h.q, r: h.r }));
+  const occupied = new Set(game.buildings.map((b) => vKey(b.vertex)));
 
-  const targets: Target[] = [];
-  const canvas = canvasRef.current;
-  if (canvas && mode && !disabled) {
-    const ox = canvas.width / 2;
-    const oy = canvas.height / 2;
-    for (const a of game.legal_actions) {
-      if (a.type !== MODE_TYPES[mode]) continue;
-      const p = actionAnchor(a, ox, oy);
-      if (p) targets.push({ x: p.x, y: p.y, index: a.index });
-    }
-  }
-
-  const nearest = useCallback((e: React.MouseEvent<HTMLCanvasElement>): Target | null => {
-    const el = canvasRef.current;
-    if (!el) return null;
-    const rect = el.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    let best: Target | null = null;
-    let bestD = 20;
-    for (const t of targets) {
-      const d = Math.hypot(mx - t.x, my - t.y);
-      if (d < bestD) { best = t; bestD = d; }
-    }
-    return best;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [game, mode, disabled]);
-
-  // Keep the canvas matched to its container.
-  useEffect(() => {
-    const onResize = () => forceRedraw((n) => n + 1);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
-  useEffect(() => {
-    const el = canvasRef.current;
-    const ctx = el?.getContext('2d');
-    if (!el || !ctx) return;
-    const rect = el.parentElement?.getBoundingClientRect();
-    if (rect) { el.width = rect.width; el.height = rect.height; }
-    const ox = el.width / 2;
-    const oy = el.height / 2;
-
-    // Ocean + island shore
-    const ocean = ctx.createRadialGradient(ox, oy, 60, ox, oy, Math.max(el.width, el.height) * 0.7);
-    ocean.addColorStop(0, '#1e5b8f');
-    ocean.addColorStop(1, '#0c2742');
-    ctx.fillStyle = ocean;
-    ctx.fillRect(0, 0, el.width, el.height);
-    const centers = game.hexes.map((h) => hexToPixel({ q: h.q, r: h.r }, ox, oy));
-    centers.forEach((c) => fillHexShape(ctx, c, HEX_RADIUS * 1.62, 'rgba(120,190,230,0.18)'));
-    centers.forEach((c) => fillHexShape(ctx, c, HEX_RADIUS * 1.3, '#e8d5a3'));
-    centers.forEach((c) => fillHexShape(ctx, c, HEX_RADIUS * 1.22, '#d9c08a'));
-
-    // Hexes: terrain, icon, number token, robber
-    game.hexes.forEach((h, i) => {
-      const c = centers[i];
-      drawHex(ctx, c, terrainColor(h.resource), 'rgba(15,23,42,0.45)', 2);
-      ctx.font = '19px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(resourceIcon(h.resource), c.x, c.y - 16);
-      if (h.number !== null) drawNumberChip(ctx, { x: c.x, y: c.y + 13 }, h.number, 15);
-      if (h.q === game.robber[0] && h.r === game.robber[1]) {
-        ctx.fillStyle = 'rgba(30,41,59,0.92)';
-        ctx.beginPath();
-        ctx.arc(c.x - 22, c.y - 2, 11, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#f8fafc';
-        ctx.font = 'bold 12px Arial';
-        ctx.fillText('R', c.x - 22, c.y - 1);
-      }
-    });
-
-    // Open building spots: faint dots on every empty vertex, always visible
-    const occupied = new Set(game.buildings.map((b) =>
-      b.vertex.map((p) => p.join(',')).join('|')));
-    for (const triple of allVertices(game)) {
-      const key = triple.map((p) => p.join(',')).join('|');
-      if (occupied.has(key)) continue;
-      const v = centroid(triple, ox, oy);
-      ctx.fillStyle = 'rgba(248,250,252,0.18)';
-      ctx.beginPath();
-      ctx.arc(v.x, v.y, 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Ports: boat offshore + ratio badge with the resource icon
-    for (const port of game.ports) {
-      const v = centroid(port.vertex, ox, oy);
-      const len = Math.hypot(v.x - ox, v.y - oy) || 1;
-      const bx = v.x + ((v.x - ox) / len) * 30;
-      const by = v.y + ((v.y - oy) / len) * 30;
-      ctx.font = '16px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('⛵', bx, by - 8);
-      const label = port.type === '3:1' ? '3:1 ?' : `2:1 ${resourceIcon(port.type)}`;
-      ctx.font = 'bold 10px Arial';
-      const w = ctx.measureText(label).width + 8;
-      ctx.fillStyle = 'rgba(248,250,252,0.92)';
-      ctx.beginPath();
-      ctx.roundRect(bx - w / 2, by + 2, w, 14, 5);
-      ctx.fill();
-      ctx.fillStyle = '#0f172a';
-      ctx.fillText(label, bx, by + 9);
-      // thin tie back to the port vertex
-      ctx.strokeStyle = 'rgba(248,250,252,0.35)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(v.x, v.y);
-      ctx.lineTo(bx, by - 2);
-      ctx.stroke();
-    }
-
-    // Roads along their true edges, then buildings on top
-    for (const r of game.roads) {
-      const [p1, p2] = edgeEndpoints(r.edge, ox, oy);
-      drawRoad(ctx, p1, p2, PLAYER_COLORS[r.owner], 7);
-    }
-    for (const b of game.buildings) {
-      const c = centroid(b.vertex, ox, oy);
-      if (b.kind === 'city') drawCity(ctx, c, PLAYER_COLORS[b.owner]);
-      else drawSettlement(ctx, c, PLAYER_COLORS[b.owner], 11);
-    }
-
-    // Legal placement targets for the active mode (glowing green)
-    for (const t of targets) {
-      ctx.fillStyle = 'rgba(134,239,172,0.22)';
-      ctx.beginPath();
-      ctx.arc(t.x, t.y, 13, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(187,247,208,0.9)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(t.x, t.y, 8, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    // Gold ring on the trainer's top recommendation (if board-targeted)
-    if (hint) {
-      const p = actionAnchor(hint, ox, oy);
-      if (p) {
-        ctx.strokeStyle = '#fbbf24';
-        ctx.lineWidth = 3;
-        ctx.setLineDash([6, 4]);
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 17, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-    }
-
-    // Hover preview
-    if (hover) {
-      ctx.strokeStyle = '#e2e8f0';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(hover.x, hover.y, 12, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  });
+  const targets = (mode && !disabled)
+    ? game.legal_actions
+        .filter((a) => a.type === MODE_TYPES[mode])
+        .map((a) => ({ at: actionAnchor(a)!, index: a.index }))
+        .filter((t) => t.at)
+    : [];
+  const hintAt = hint ? actionAnchor(hint) : null;
 
   return (
-    <canvas
-      ref={canvasRef}
-      className={`h-full w-full ${hover ? 'cursor-pointer' : 'cursor-default'}`}
-      style={{ display: 'block' }}
-      onMouseMove={(e) => setHover(nearest(e))}
-      onMouseLeave={() => setHover(null)}
-      onClick={(e) => {
-        const t = nearest(e);
-        if (t) { setHover(null); onPick(t.index); }
-      }}
-    />
+    <svg viewBox="-272 -252 544 504" preserveAspectRatio="xMidYMid meet"
+         className="h-full w-full" role="img" aria-label="Hexopolis board">
+      <defs>
+        <radialGradient id="ocean" cx="50%" cy="50%" r="75%">
+          <stop offset="0%" stopColor="#1e5b8f" />
+          <stop offset="100%" stopColor="#0c2742" />
+        </radialGradient>
+      </defs>
+      <rect x={-272} y={-252} width={544} height={504} fill="url(#ocean)" />
+
+      {/* Shore glow + sandy coastline */}
+      {centers.map((c, i) => (
+        <polygon key={`g${i}`} points={pointsAttr(hexCorners(c, HEX_RADIUS * 1.62))}
+                 fill="rgba(120,190,230,0.18)" />
+      ))}
+      {centers.map((c, i) => (
+        <polygon key={`s${i}`} points={pointsAttr(hexCorners(c, HEX_RADIUS * 1.3))} fill="#e8d5a3" />
+      ))}
+      {centers.map((c, i) => (
+        <polygon key={`t${i}`} points={pointsAttr(hexCorners(c, HEX_RADIUS * 1.22))} fill="#d9c08a" />
+      ))}
+
+      {/* Terrain hexes with icon + number token */}
+      {game.hexes.map((h, i) => {
+        const c = centers[i];
+        return (
+          <g key={`${h.q},${h.r}`}>
+            <polygon points={pointsAttr(hexCorners(c))} fill={terrainColor(h.resource)}
+                     stroke="rgba(15,23,42,0.45)" strokeWidth={2} />
+            <text x={c.x} y={c.y - 16} textAnchor="middle" dominantBaseline="middle"
+                  fontSize={19} pointerEvents="none">
+              {resourceIcon(h.resource)}
+            </text>
+            {h.number !== null && <NumberChip at={{ x: c.x, y: c.y + 13 }} n={h.number} />}
+            {h.q === game.robber[0] && h.r === game.robber[1] && (
+              <g pointerEvents="none" className="piece-pop">
+                <circle cx={c.x - 22} cy={c.y - 2} r={11} fill="rgba(30,41,59,0.92)" />
+                <text x={c.x - 22} y={c.y - 1} textAnchor="middle" dominantBaseline="middle"
+                      fontSize={12} fontWeight={700} fill="#f8fafc">R</text>
+              </g>
+            )}
+          </g>
+        );
+      })}
+
+      {/* Ports: boat offshore, ratio badge, tie-line to the vertex */}
+      {game.ports.map((port, i) => {
+        const v = centroid(port.vertex);
+        const len = Math.hypot(v.x, v.y) || 1;
+        const bx = v.x + (v.x / len) * 30;
+        const by = v.y + (v.y / len) * 30;
+        const label = port.type === '3:1' ? '3:1 ?' : `2:1 ${resourceIcon(port.type)}`;
+        return (
+          <g key={`p${i}`} pointerEvents="none">
+            <line x1={v.x} y1={v.y} x2={bx} y2={by - 2} stroke="rgba(248,250,252,0.35)" />
+            <text x={bx} y={by - 8} textAnchor="middle" fontSize={15}>⛵</text>
+            <rect x={bx - 21} y={by + 2} width={42} height={14} rx={5}
+                  fill="rgba(248,250,252,0.92)" />
+            <text x={bx} y={by + 9.5} textAnchor="middle" dominantBaseline="middle"
+                  fontSize={9} fontWeight={700} fill="#0f172a">{label}</text>
+          </g>
+        );
+      })}
+
+      {/* Open building spots — always faintly visible */}
+      {allVertices(game).map((triple) => {
+        const key = vKey(triple);
+        if (occupied.has(key)) return null;
+        const v = centroid(triple);
+        return <circle key={key} cx={v.x} cy={v.y} r={3} fill="rgba(248,250,252,0.18)"
+                       pointerEvents="none" />;
+      })}
+
+      {/* Roads (dark outline under color), then buildings on top */}
+      {game.roads.map((r) => {
+        const [p1, p2] = edgeEndpoints(r.edge);
+        const key = r.edge.map((p) => p.join(',')).join('|');
+        return (
+          <g key={key} className="piece-pop">
+            <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="#1e293b"
+                  strokeWidth={10} strokeLinecap="round" />
+            <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={PLAYER_COLORS[r.owner]}
+                  strokeWidth={7} strokeLinecap="round" />
+          </g>
+        );
+      })}
+      {game.buildings.map((b) => {
+        const at = centroid(b.vertex);
+        return b.kind === 'city'
+          ? <City key={vKey(b.vertex)} at={at} color={PLAYER_COLORS[b.owner]} />
+          : <Settlement key={vKey(b.vertex)} at={at} color={PLAYER_COLORS[b.owner]} />;
+      })}
+
+      {/* Clickable targets for the active mode */}
+      {targets.map((t) => (
+        <g key={t.index} className="board-target cursor-pointer" onClick={() => onPick(t.index)}>
+          <circle cx={t.at.x} cy={t.at.y} r={16} fill="transparent" />
+          <circle className="target-pulse" cx={t.at.x} cy={t.at.y} r={13}
+                  fill="rgba(134,239,172,0.22)" pointerEvents="none" />
+          <circle className="target-ring" cx={t.at.x} cy={t.at.y} r={8} fill="none"
+                  stroke="rgba(187,247,208,0.9)" strokeWidth={2} pointerEvents="none" />
+        </g>
+      ))}
+
+      {/* Gold ring on the trainer's top recommendation */}
+      {hintAt && (
+        <circle className="hint-ring" cx={hintAt.x} cy={hintAt.y} r={17} fill="none"
+                stroke="#fbbf24" strokeWidth={3} strokeDasharray="6 4" pointerEvents="none" />
+      )}
+    </svg>
   );
 }
