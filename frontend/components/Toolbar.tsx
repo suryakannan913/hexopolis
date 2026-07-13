@@ -72,22 +72,27 @@ export default function Toolbar({ game, mode, setMode, busy, onAct }: ToolbarPro
     setMode(mode === m ? null : m);
 
   return (
-    <div className="relative flex flex-col items-center gap-1.5">
-      {tradeOpen && trades.length > 0 && (
-        <div className="absolute bottom-full mb-2 rounded-lg border border-slate-600 bg-slate-800 p-2 shadow-xl">
-          <ChipRow actions={trades} busy={busy}
-                   onAct={(i) => { setTradeOpen(false); onAct(i); }}
-                   accent="bg-teal-700 hover:bg-teal-600" />
+    <div className="relative flex items-center">
+      {/* Contextual rows float ABOVE the toolbar so the footer (and therefore
+          the board) never changes size when they appear. */}
+      {(discards.length > 0 || devPlays.length > 0 || (tradeOpen && trades.length > 0)) && (
+        <div className="absolute bottom-full left-1/2 z-10 mb-2 flex w-max max-w-[42rem]
+                        -translate-x-1/2 flex-col items-center gap-1.5 rounded-lg border
+                        border-slate-600 bg-slate-800/95 p-2 shadow-xl">
+          {discards.length > 0 && (
+            <ChipRow actions={discards} busy={busy} onAct={onAct}
+                     accent="bg-rose-700 hover:bg-rose-600" />
+          )}
+          {devPlays.length > 0 && (
+            <ChipRow actions={devPlays} busy={busy} onAct={onAct}
+                     accent="bg-purple-700 hover:bg-purple-600" />
+          )}
+          {tradeOpen && trades.length > 0 && (
+            <ChipRow actions={trades} busy={busy}
+                     onAct={(i) => { setTradeOpen(false); onAct(i); }}
+                     accent="bg-teal-700 hover:bg-teal-600" />
+          )}
         </div>
-      )}
-
-      {discards.length > 0 && (
-        <ChipRow actions={discards} busy={busy} onAct={onAct}
-                 accent="bg-rose-700 hover:bg-rose-600" />
-      )}
-      {devPlays.length > 0 && (
-        <ChipRow actions={devPlays} busy={busy} onAct={onAct}
-                 accent="bg-purple-700 hover:bg-purple-600" />
       )}
 
       <div className="flex items-center gap-1.5">

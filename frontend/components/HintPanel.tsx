@@ -36,7 +36,7 @@ export default function HintPanel(props: HintPanelProps) {
   const showProb = hints?.tier === 'mc' || hints?.tier === 'mcts';
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-800 p-3 space-y-2">
+    <div className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 p-3 space-y-2">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-slate-100">🎓 Trainer</h3>
         <label className="flex items-center gap-1.5 text-xs text-slate-400">

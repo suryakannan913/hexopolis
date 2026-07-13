@@ -103,7 +103,8 @@ export default function GamePage() {
           )}
         </div>
 
-        <aside className="flex w-80 shrink-0 flex-col gap-2 overflow-hidden">
+        {/* Fixed-width rail: never reshapes — it scrolls when content grows */}
+        <aside className="flex w-80 shrink-0 flex-col gap-2 overflow-y-auto overflow-x-hidden">
           <LogPanel log={log} />
           <BankRow game={game} />
           <HintPanel
@@ -119,8 +120,9 @@ export default function GamePage() {
         </aside>
       </div>
 
-      {/* Bottom: hand | toolbar | player status */}
-      <footer className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-end gap-3 px-3 pb-2 pt-1">
+      {/* Bottom: hand | toolbar | player status. Fixed height so contextual
+          chip rows (rendered as overlays) never resize the board above. */}
+      <footer className="grid h-24 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 px-3">
         <HandCards game={game} />
         <Toolbar game={game} mode={mode} setMode={setMode} busy={busy} onAct={act} />
         <StatusCard game={game} />

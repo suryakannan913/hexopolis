@@ -142,7 +142,7 @@ export default function GameBoard({ game, mode, hint, heat, disabled, onPick }: 
   const hintAt = hint ? actionAnchor(hint) : null;
 
   return (
-    <svg viewBox="-272 -252 544 504" preserveAspectRatio="xMidYMid meet"
+    <svg viewBox="-290 -264 580 528" preserveAspectRatio="xMidYMid meet"
          className="h-full w-full" role="img" aria-label="Hexopolis board">
       <defs>
         <radialGradient id="ocean" cx="50%" cy="50%" r="75%">
@@ -150,7 +150,7 @@ export default function GameBoard({ game, mode, hint, heat, disabled, onPick }: 
           <stop offset="100%" stopColor="#0c2742" />
         </radialGradient>
       </defs>
-      <rect x={-272} y={-252} width={544} height={504} fill="url(#ocean)" />
+      <rect x={-290} y={-264} width={580} height={528} fill="url(#ocean)" />
 
       {/* Shore glow + sandy coastline */}
       {centers.map((c, i) => (

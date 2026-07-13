@@ -12,7 +12,7 @@ export default function LogPanel({ log }: { log: LogEntry[] }) {
   }, [log.length]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-lg bg-[#f5ecd7] text-slate-900">
+    <div className="flex h-80 shrink-0 flex-col rounded-lg bg-[#f5ecd7] text-slate-900">
       <div className="border-b border-amber-900/15 px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-amber-900/70">
         Game log
       </div>
