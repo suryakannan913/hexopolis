@@ -105,13 +105,14 @@ function City({ at, color }: { at: PixelCoord; color: string }) {
 }
 
 function NumberChip({ at, n }: { at: PixelCoord; n: number }) {
+  // Uniform token styling across all tiles: same cream disc, same neutral
+  // border. Only the numeral + pips go red on the high-probability 6 and 8.
   const hot = n === 6 || n === 8;
-  const color = hot ? '#b91c1c' : '#1f2937';
+  const color = hot ? '#c81e1e' : '#1f2937';
   const pips = 6 - Math.abs(7 - n);
   return (
     <g pointerEvents="none">
-      <circle cx={at.x} cy={at.y} r={15} fill="#f5ecd7"
-              stroke={hot ? '#b91c1c' : '#9ca3af'} strokeWidth={1.5} />
+      <circle cx={at.x} cy={at.y} r={15} fill="#f5ecd7" stroke="#b3a27a" strokeWidth={1.5} />
       <text x={at.x} y={at.y + 1} textAnchor="middle" dominantBaseline="middle"
             fontSize={15} fontWeight={700} fill={color} fontFamily="Georgia, serif">
         {n}
@@ -171,10 +172,15 @@ export default function GameBoard({ game, mode, hint, heat, disabled, onPick }: 
           <g key={`${h.q},${h.r}`}>
             <polygon points={pointsAttr(hexCorners(c))} fill={terrainColor(h.resource)}
                      stroke="rgba(15,23,42,0.45)" strokeWidth={2} />
-            <text x={c.x} y={c.y - 16} textAnchor="middle" dominantBaseline="middle"
-                  fontSize={19} pointerEvents="none">
-              {resourceIcon(h.resource)}
-            </text>
+            {/* Icon on a uniform disc so every tile reads consistently */}
+            <g pointerEvents="none">
+              <circle cx={c.x} cy={c.y - 16} r={11.5} fill="rgba(255,255,255,0.28)"
+                      stroke="rgba(255,255,255,0.35)" strokeWidth={1} />
+              <text x={c.x} y={c.y - 15} textAnchor="middle" dominantBaseline="middle"
+                    fontSize={14}>
+                {resourceIcon(h.resource)}
+              </text>
+            </g>
             {h.number !== null && <NumberChip at={{ x: c.x, y: c.y + 13 }} n={h.number} />}
             {h.q === game.robber[0] && h.r === game.robber[1] && (
               <g pointerEvents="none" className="piece-pop">
@@ -211,7 +217,7 @@ export default function GameBoard({ game, mode, hint, heat, disabled, onPick }: 
         const key = vKey(triple);
         if (occupied.has(key)) return null;
         const v = centroid(triple);
-        return <circle key={key} cx={v.x} cy={v.y} r={3} fill="rgba(248,250,252,0.18)"
+        return <circle key={key} cx={v.x} cy={v.y} r={2.5} fill="rgba(248,250,252,0.12)"
                        pointerEvents="none" />;
       })}
 

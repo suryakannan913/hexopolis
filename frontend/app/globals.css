@@ -1,8 +1,7 @@
+/* Tailwind v4: this single import replaces the old v3 @tailwind directives
+   (which v4 silently ignores — leaving the whole app unstyled). */
+@import 'tailwindcss';
 @import './animations.css';
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
 
 html, body {
   height: 100%;

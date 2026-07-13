@@ -10,6 +10,8 @@ interface HintPanelProps {
   analyzing: boolean;
   autoHint: boolean;
   setAutoHint: (v: boolean) => void;
+  showHeat: boolean;
+  setShowHeat: (v: boolean) => void;
   onAnalyze: (tier: 'value' | 'alphabeta' | 'mc' | 'mcts', sims?: number) => void;
   onAct: (index: number) => void;
   busy: boolean;
@@ -30,20 +32,29 @@ function metric(x: { win_probability?: number; score?: number; sims?: number }):
 
 /** The trainer: rank the current position's moves on demand. */
 export default function HintPanel(props: HintPanelProps) {
-  const { game, hints, analyzing, autoHint, setAutoHint, onAnalyze, onAct, busy } = props;
+  const { game, hints, analyzing, autoHint, setAutoHint,
+          showHeat, setShowHeat, onAnalyze, onAct, busy } = props;
   const [tier, setTier] = useState<(typeof TIERS)[number]['id']>('value');
   const stale = hints === null;
   const showProb = hints?.tier === 'mc' || hints?.tier === 'mcts';
 
   return (
-    <div className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 p-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-slate-100">🎓 Trainer</h3>
-        <label className="flex items-center gap-1.5 text-xs text-slate-400">
-          <input type="checkbox" checked={autoHint} onChange={(e) => setAutoHint(e.target.checked)} />
-          auto-hint
-        </label>
+    <div className="shrink-0 overflow-hidden rounded-lg border border-amber-600/40 bg-slate-800">
+      <div className="flex items-center justify-between border-b border-amber-600/30 bg-amber-950/40 px-3 py-1.5">
+        <h3 className="text-xs font-bold uppercase tracking-wide text-amber-300">🎓 Trainer</h3>
+        <div className="flex gap-3">
+          <label className="flex items-center gap-1 text-[11px] text-slate-400">
+            <input type="checkbox" checked={autoHint} onChange={(e) => setAutoHint(e.target.checked)} />
+            auto-hint
+          </label>
+          <label className="flex items-center gap-1 text-[11px] text-slate-400"
+                 title="Shade legal spots red→green by trainer score">
+            <input type="checkbox" checked={showHeat} onChange={(e) => setShowHeat(e.target.checked)} />
+            heat overlay
+          </label>
+        </div>
       </div>
+      <div className="space-y-2 p-3">
 
       <div className="flex gap-1.5">
         {TIERS.map((t) => (
@@ -97,9 +108,10 @@ export default function HintPanel(props: HintPanelProps) {
       )}
       {stale && !analyzing && game.actor === 0 && game.winner === null && (
         <div className="text-xs text-slate-500">
-          Pick a tier and hit Analyze — Monte Carlo tiers take ~10s but return win probabilities.
+          Pick a tier and hit Analyze — Monte Carlo tiers return win probabilities.
         </div>
       )}
+      </div>
     </div>
   );
 }

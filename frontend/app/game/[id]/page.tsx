@@ -22,6 +22,7 @@ export default function GamePage() {
     useGame(gameId);
   const [mode, setMode] = useState<BoardMode>(null);
   const [showReview, setShowReview] = useState(false);
+  const [showHeat, setShowHeat] = useState(false); // trainer heat overlay is opt-in
 
   // Phases with exactly one kind of board interaction force the mode.
   const phase = game?.phase;
@@ -60,7 +61,9 @@ export default function GamePage() {
   }
 
   return (
-    <main className="flex h-screen flex-col overflow-hidden bg-slate-900 text-white">
+    // fixed inset-0 pins the game to the viewport regardless of any body
+    // scroll quirks — the board can never extend below the fold.
+    <main className="fixed inset-0 flex flex-col overflow-hidden bg-slate-900 text-white">
       <PromptBar game={game} error={error} />
 
       {/* Center: board anchor + fixed-width right rail (log, bank, trainer) */}
@@ -70,7 +73,7 @@ export default function GamePage() {
             game={game}
             mode={mode}
             hint={boardHint}
-            heat={heat}
+            heat={showHeat ? heat : undefined}
             disabled={busy || game.actor !== 0 || game.winner !== null}
             onPick={act}
           />
@@ -113,6 +116,8 @@ export default function GamePage() {
             analyzing={analyzing}
             autoHint={autoHint}
             setAutoHint={setAutoHint}
+            showHeat={showHeat}
+            setShowHeat={setShowHeat}
             onAnalyze={analyze}
             onAct={act}
             busy={busy}
